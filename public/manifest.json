@@ -1,0 +1,9 @@
+{
+  "name": "POS System",
+  "short_name": "POS",
+  "description": "Offline-capable point of sale system",
+  "display": "standalone",
+  "start_url": "/pos",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb"
+}

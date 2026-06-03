@@ -1,15 +1,14 @@
 import { NextRequest } from "next/server";
-import { writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { v2 as cloudinary } from "cloudinary";
 
-const MAX_SIZE = 2 * 1024 * 1024; // 2 MB
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+const MAX_SIZE = 2 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
-const EXT: Record<string, string> = {
-  "image/jpeg": ".jpg",
-  "image/png": ".png",
-  "image/webp": ".webp",
-};
 
 export async function POST(request: NextRequest) {
   try {
@@ -37,14 +36,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const uploadsDir = join(process.cwd(), "public", "uploads");
-    await mkdir(uploadsDir, { recursive: true });
+    const buffer = Buffer.from(await file.arrayBuffer());
 
-    const filename = randomUUID() + EXT[file.type];
-    const bytes = await file.arrayBuffer();
-    await writeFile(join(uploadsDir, filename), Buffer.from(bytes));
+    const result = await new Promise<{ secure_url: string }>((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        { folder: "pos/products", resource_type: "image" },
+        (error, result) => {
+          if (error || !result) reject(error ?? new Error("Upload failed"));
+          else resolve(result as { secure_url: string });
+        }
+      );
+      stream.end(buffer);
+    });
 
-    return Response.json({ data: { url: `/uploads/${filename}` }, error: null }, { status: 201 });
+    return Response.json({ data: { url: result.secure_url }, error: null }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return Response.json({ data: null, error: message }, { status: 500 });
