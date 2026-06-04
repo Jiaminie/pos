@@ -7,11 +7,13 @@ export type Product = {
   id: string
   name: string
   sku: string
+  specification?: string   // size/variant e.g. "250ml", "32mm", "3/4"
+  stockUnit?: string       // unit label e.g. "pcs", "box", "pkt", "roll"
   sellingPrice: number
   costPrice: number
   categoryId: string
   imageUrl?: string
-  initialStock?: number     // parsed from quantity string on server sync
+  initialStock?: number
   category?: ProductCategory
 }
 

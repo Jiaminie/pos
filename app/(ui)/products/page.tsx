@@ -10,7 +10,7 @@ import { getAll as getCategories, upsertMany as upsertCategories } from '@/lib/d
 import { seedIfEmpty, syncFromServer } from '@/lib/db/seed'
 import type { Product, ProductCategory } from '@/lib/types'
 
-const emptyForm = { name: '', sku: '', sellingPrice: '', costPrice: '', categoryId: '', newCategory: '', imageUrl: '' }
+const emptyForm = { name: '', sku: '', specification: '', stockUnit: 'pcs', sellingPrice: '', costPrice: '', categoryId: '', newCategory: '', imageUrl: '' }
 const PAGE_SIZE = 20
 
 export default function ProductsPage() {
@@ -83,6 +83,8 @@ export default function ProductsPage() {
     setForm({
       name: p.name,
       sku: p.sku,
+      specification: p.specification ?? '',
+      stockUnit: p.stockUnit ?? 'pcs',
       sellingPrice: String(p.sellingPrice),
       costPrice: String(p.costPrice),
       categoryId: p.categoryId ?? '',
@@ -111,6 +113,8 @@ export default function ProductsPage() {
         ...editingProduct,
         name: form.name,
         sku: form.sku,
+        specification: form.specification || undefined,
+        stockUnit: form.stockUnit || undefined,
         sellingPrice: parseFloat(form.sellingPrice) || 0,
         costPrice: parseFloat(form.costPrice) || 0,
         categoryId,
@@ -123,6 +127,8 @@ export default function ProductsPage() {
         body: JSON.stringify({
           name: updated.name,
           sku: updated.sku,
+          specification: updated.specification ?? null,
+          stockUnit: updated.stockUnit ?? null,
           sellingPrice: updated.sellingPrice,
           costPrice: updated.costPrice,
           category: categoryName,
@@ -135,6 +141,8 @@ export default function ProductsPage() {
         id: crypto.randomUUID(),
         name: form.name,
         sku: form.sku,
+        specification: form.specification || undefined,
+        stockUnit: form.stockUnit || undefined,
         sellingPrice: parseFloat(form.sellingPrice) || 0,
         costPrice: parseFloat(form.costPrice) || 0,
         categoryId,
@@ -226,6 +234,21 @@ export default function ProductsPage() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
+                    <Label.Root htmlFor="p-spec" className="text-sm font-medium text-gray-700">Specification / Size <span className="text-gray-400 font-normal">(optional)</span></Label.Root>
+                    <input id="p-spec" value={form.specification} onChange={field('specification')}
+                      placeholder="e.g. 250ml, 32mm, 3/4&quot;"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label.Root htmlFor="p-unit" className="text-sm font-medium text-gray-700">Stock Unit</Label.Root>
+                    <input id="p-unit" value={form.stockUnit} onChange={field('stockUnit')}
+                      placeholder="e.g. pcs, box, pkt, roll"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
                     <Label.Root htmlFor="p-sell" className="text-sm font-medium text-gray-700">Selling price</Label.Root>
                     <input id="p-sell" required type="number" min="0" step="0.01" value={form.sellingPrice} onChange={field('sellingPrice')}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -313,6 +336,7 @@ export default function ProductsPage() {
               <tr>
                 <th className="px-4 py-3 w-12"></th>
                 <th className="text-left px-4 py-3">Name</th>
+                <th className="text-left px-4 py-3">Spec / Size</th>
                 <th className="text-left px-4 py-3">SKU</th>
                 <th className="text-left px-4 py-3">Category</th>
                 <th className="text-right px-4 py-3">Selling price</th>
@@ -334,6 +358,12 @@ export default function ProductsPage() {
                     )}
                   </td>
                   <td className="px-4 py-3 font-medium">{p.name}</td>
+                  <td className="px-4 py-3 text-xs text-gray-500">
+                    {p.specification && <span className="font-medium text-gray-700">{p.specification}</span>}
+                    {p.specification && p.stockUnit && <span className="text-gray-400"> · </span>}
+                    {p.stockUnit && <span className="text-gray-400">{p.stockUnit}</span>}
+                    {!p.specification && !p.stockUnit && <span className="text-gray-300">—</span>}
+                  </td>
                   <td className="px-4 py-3 font-mono text-xs text-gray-500">{p.sku}</td>
                   <td className="px-4 py-3 text-gray-500">{categoryMap[p.categoryId] ?? '—'}</td>
                   <td className="px-4 py-3 text-right">{p.sellingPrice.toLocaleString()}</td>

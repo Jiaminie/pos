@@ -107,6 +107,8 @@ function addFooters(doc: jsPDF, settings: PDFSettings) {
 export interface QuotationItem {
   name: string
   sku: string
+  specification?: string
+  stockUnit?: string
   qty: number
   unitPrice: number
 }
@@ -171,11 +173,12 @@ export function generateQuotationPDF(data: QuotationData): jsPDF {
   y = drawSectionHeader(doc, 'Items', y, primary)
   autoTable(doc, {
     startY: y,
-    head: [['Product', 'SKU', 'Qty', `Unit Price (${cur})`, `Amount (${cur})`]],
+    head: [['Product', 'Spec / Size', 'SKU', 'Qty', `Unit Price (${cur})`, `Amount (${cur})`]],
     body: data.items.map((i) => [
       i.name,
+      i.specification ?? '—',
       i.sku,
-      i.qty,
+      `${i.qty}${i.stockUnit ? ' ' + i.stockUnit : ''}`,
       i.unitPrice.toLocaleString(),
       (i.qty * i.unitPrice).toLocaleString(),
     ]),
@@ -183,7 +186,7 @@ export function generateQuotationPDF(data: QuotationData): jsPDF {
     footStyles: { fontStyle: 'bold', fillColor: primary, textColor: WHITE },
     headStyles: { fillColor: primary, textColor: WHITE, fontSize: 9 },
     bodyStyles: { fontSize: 9 },
-    columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
+    columnStyles: { 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' } },
     margin: { left: MARGIN, right: MARGIN },
   })
 
@@ -212,6 +215,8 @@ export function generateQuotationPDF(data: QuotationData): jsPDF {
 export interface COBReportRow {
   name: string
   sku: string
+  specification?: string
+  stockUnit?: string
   category: string
   sold: number
   stocked: number
@@ -276,13 +281,14 @@ export function generateCOBReportPDF(data: COBReportData): jsPDF {
   y = drawSectionHeader(doc, 'Product Breakdown', y, primary)
   autoTable(doc, {
     startY: y,
-    head: [['Product', 'SKU', 'Category', 'Sold', 'Stocked', `Revenue (${cur})`, 'Net Stock']],
+    head: [['Product', 'Spec', 'SKU', 'Category', 'Sold', 'Stocked', `Revenue (${cur})`, 'Net Stock']],
     body: data.rows.map((r) => [
       r.name,
+      r.specification ?? '—',
       r.sku,
       r.category,
-      r.sold,
-      r.stocked,
+      `${r.sold}${r.stockUnit ? ' ' + r.stockUnit : ''}`,
+      `${r.stocked}${r.stockUnit ? ' ' + r.stockUnit : ''}`,
       r.revenue.toLocaleString(),
       {
         content: r.netStock,
@@ -295,10 +301,10 @@ export function generateCOBReportPDF(data: COBReportData): jsPDF {
     headStyles: { fillColor: primary, textColor: WHITE, fontSize: 8 },
     bodyStyles: { fontSize: 8 },
     columnStyles: {
-      3: { halign: 'right' },
       4: { halign: 'right' },
       5: { halign: 'right' },
       6: { halign: 'right' },
+      7: { halign: 'right' },
     },
     alternateRowStyles: { fillColor: [249, 250, 251] },
     margin: { left: MARGIN, right: MARGIN },

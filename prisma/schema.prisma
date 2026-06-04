@@ -10,6 +10,7 @@ model Product {
   id            String   @id @default(uuid())
   name          String
   specification String?
+  stockUnit     String?  @map("stock_unit")
   sku           String   @unique
   sellingPrice  Decimal  @map("selling_price")
   costPrice     Decimal  @map("cost_price")

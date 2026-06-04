@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, sku, sellingPrice, costPrice, imageUrl, category } = body;
+    const { name, sku, sellingPrice, costPrice, imageUrl, category, specification, stockUnit } = body;
 
     if (!name || !sku || sellingPrice == null || costPrice == null) {
       return Response.json(
@@ -69,6 +69,8 @@ export async function POST(request: NextRequest) {
         costPrice,
         imageUrl: imageUrl ?? null,
         category: category ?? null,
+        specification: specification ?? null,
+        stockUnit: stockUnit ?? null,
       },
     });
     return Response.json({ data: product, error: null }, { status: 201 });

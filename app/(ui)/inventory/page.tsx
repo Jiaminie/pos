@@ -233,12 +233,15 @@ export default function InventoryPage() {
               <div key={product.id} className="flex items-center gap-3 px-4 py-3 bg-white hover:bg-amber-50/40 transition-colors">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{product.name}</p>
-                  <p className="text-xs text-gray-400 font-mono">{product.sku}</p>
+                  <p className="text-xs text-gray-400 font-mono">
+                    {product.sku}
+                    {product.specification && <span className="ml-1 text-gray-500">· {product.specification}</span>}
+                  </p>
                 </div>
                 <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${
                   stock === 0 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
                 }`}>
-                  {stock === 0 ? 'Out of stock' : `${stock} left`}
+                  {stock === 0 ? 'Out of stock' : `${stock} ${product.stockUnit ?? 'left'}`}
                 </span>
                 <div className="flex items-center gap-1.5 shrink-0">
                   <input

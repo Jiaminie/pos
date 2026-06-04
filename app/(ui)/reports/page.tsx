@@ -31,6 +31,8 @@ interface ReportRow {
   productId: string
   name: string
   sku: string
+  specification?: string
+  stockUnit?: string
   category: string
   sold: number
   stocked: number
@@ -89,14 +91,16 @@ export default function ReportsPage() {
     const sold    = sales.filter((t) => t.productId === id).reduce((s, t) => s + t.quantity, 0)
     const stocked = stockIns.filter((t) => t.productId === id).reduce((s, t) => s + t.quantity, 0)
     return {
-      productId: id,
-      name:      p?.name ?? id,
-      sku:       p?.sku  ?? '—',
-      category:  p ? (categoryMap[p.categoryId] ?? '—') : '—',
+      productId:     id,
+      name:          p?.name ?? id,
+      sku:           p?.sku  ?? '—',
+      specification: p?.specification,
+      stockUnit:     p?.stockUnit,
+      category:      p ? (categoryMap[p.categoryId] ?? '—') : '—',
       sold,
       stocked,
-      revenue:   sold * (p?.sellingPrice ?? 0),
-      netStock:  computeStock(id, transactions, p?.initialStock ?? 0),
+      revenue:       sold * (p?.sellingPrice ?? 0),
+      netStock:      computeStock(id, transactions, p?.initialStock ?? 0),
     }
   }).sort((a, b) => b.revenue - a.revenue)
 
@@ -239,6 +243,7 @@ export default function ReportsPage() {
             <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
               <tr>
                 <th className="text-left px-4 py-3">Product</th>
+                <th className="text-left px-4 py-3">Spec / Size</th>
                 <th className="text-left px-4 py-3">SKU</th>
                 <th className="text-left px-4 py-3">Category</th>
                 <th className="text-right px-4 py-3">Sold</th>
@@ -251,13 +256,14 @@ export default function ReportsPage() {
               {rows.map((r) => (
                 <tr key={r.productId} className="hover:bg-gray-50">
                   <td className="px-4 py-3 font-medium">{r.name}</td>
+                  <td className="px-4 py-3 text-xs text-gray-500">{r.specification ?? '—'}</td>
                   <td className="px-4 py-3 font-mono text-xs text-gray-500">{r.sku}</td>
                   <td className="px-4 py-3 text-gray-500">{r.category}</td>
-                  <td className="px-4 py-3 text-right">{r.sold}</td>
-                  <td className="px-4 py-3 text-right">{r.stocked}</td>
+                  <td className="px-4 py-3 text-right">{r.sold}{r.stockUnit ? ` ${r.stockUnit}` : ''}</td>
+                  <td className="px-4 py-3 text-right">{r.stocked}{r.stockUnit ? ` ${r.stockUnit}` : ''}</td>
                   <td className="px-4 py-3 text-right font-medium">{r.revenue.toLocaleString()}</td>
                   <td className={`px-4 py-3 text-right font-medium ${r.netStock < LOW_STOCK_THRESHOLD ? 'text-amber-600' : 'text-gray-700'}`}>
-                    {r.netStock}
+                    {r.netStock}{r.stockUnit ? ` ${r.stockUnit}` : ''}
                   </td>
                 </tr>
               ))}

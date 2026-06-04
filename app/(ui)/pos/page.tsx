@@ -189,7 +189,7 @@ export default function POSPage() {
         note: quoteForm.note || undefined,
         quoteRef,
         date: new Date().toLocaleDateString('en-KE', { year: 'numeric', month: 'long', day: 'numeric' }),
-        items: cart.map((i) => ({ name: i.name, sku: i.sku, qty: i.qty, unitPrice: i.sellingPrice })),
+        items: cart.map((i) => ({ name: i.name, sku: i.sku, specification: i.specification, stockUnit: i.stockUnit, qty: i.qty, unitPrice: i.sellingPrice })),
       })
       doc.save(`quotation-${quoteRef}.pdf`)
       toast.success('Quotation downloaded', { description: `Ref: ${quoteRef}` })
@@ -248,10 +248,15 @@ export default function POSPage() {
                         : 'border-gray-200 hover:border-blue-400 hover:bg-blue-50'
                     }`}>
                     <p className="font-medium text-sm leading-snug">{p.name}</p>
-                    <p className="text-xs text-gray-500 font-mono mt-0.5">{p.sku}</p>
+                    <p className="text-xs text-gray-400 font-mono mt-0.5">{p.sku}</p>
+                    {p.specification && (
+                      <p className="text-xs text-gray-500 mt-0.5">{p.specification}</p>
+                    )}
                     <p className="text-blue-600 font-semibold mt-2">KES {p.sellingPrice.toLocaleString()}</p>
                     {isLow && (
-                      <p className="text-xs text-amber-600 font-medium mt-1">⚠ {stock} left</p>
+                      <p className="text-xs text-amber-600 font-medium mt-1">
+                        ⚠ {stock} {p.stockUnit ?? 'left'}
+                      </p>
                     )}
                   </button>
                 )
