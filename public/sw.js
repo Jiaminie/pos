@@ -1,6 +1,6 @@
-const SHELL_CACHE = 'pos-shell-v1'
-const STATIC_CACHE = 'pos-static-v1'
-const API_CACHE = 'pos-api-v1'
+const SHELL_CACHE = 'pos-shell-v2'
+const STATIC_CACHE = 'pos-static-v2'
+const API_CACHE = 'pos-api-v2'
 const ALL_CACHES = [SHELL_CACHE, STATIC_CACHE, API_CACHE]
 
 const SHELL_URLS = ['/pos', '/products', '/inventory', '/categories', '/reports']
@@ -26,16 +26,15 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url)
 
-  // Static Next.js assets — cache first
+  // Static Next.js assets — network first, cache fallback (prevents stale chunk breakage after deploys)
   if (url.pathname.startsWith('/_next/static/')) {
     event.respondWith(
-      caches.match(request).then((cached) => {
-        if (cached) return cached
-        return fetch(request).then((res) => {
-          caches.open(STATIC_CACHE).then((c) => c.put(request, res.clone()))
+      fetch(request)
+        .then((res) => {
+          if (res.ok) caches.open(STATIC_CACHE).then((c) => c.put(request, res.clone()))
           return res
         })
-      })
+        .catch(() => caches.match(request))
     )
     return
   }
