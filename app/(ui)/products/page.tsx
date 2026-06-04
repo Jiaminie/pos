@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Label from '@radix-ui/react-label'
 import * as Select from '@radix-ui/react-select'
@@ -8,6 +8,7 @@ import { Camera, ChevronDown, ChevronLeft, ChevronRight, Pencil, Plus, Search, X
 import { getAll as getProducts, upsertMany } from '@/lib/db/products'
 import { getAll as getCategories, upsertMany as upsertCategories } from '@/lib/db/categories'
 import { seedIfEmpty, syncFromServer } from '@/lib/db/seed'
+import { cleanProductName, normalizeQuery, skuFromName } from '@/lib/normalize'
 import type { Product, ProductCategory } from '@/lib/types'
 
 const emptyForm = { name: '', sku: '', specification: '', stockUnit: 'pcs', sellingPrice: '', costPrice: '', categoryId: '', newCategory: '', imageUrl: '' }
@@ -21,6 +22,7 @@ export default function ProductsPage() {
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const skuTouched = useRef(false)
   const [filterCategoryId, setFilterCategoryId] = useState<string>('all')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -78,13 +80,47 @@ export default function ProductsPage() {
       setForm((f) => ({ ...f, [key]: e.target.value }))
   }
 
+  function handleNameChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const name = e.target.value
+    setForm((f) => ({
+      ...f,
+      name,
+      ...(!skuTouched.current && { sku: skuFromName(name, f.specification) }),
+    }))
+  }
+
+  function handleNameBlur(e: React.FocusEvent<HTMLInputElement>) {
+    const cleaned = cleanProductName(e.target.value)
+    setForm((f) => ({
+      ...f,
+      name: cleaned,
+      ...(!skuTouched.current && { sku: skuFromName(cleaned, f.specification) }),
+    }))
+  }
+
+  function handleSpecChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const specification = e.target.value
+    setForm((f) => ({
+      ...f,
+      specification,
+      ...(!skuTouched.current && { sku: skuFromName(f.name, specification) }),
+    }))
+  }
+
+  function handleSkuChange(e: React.ChangeEvent<HTMLInputElement>) {
+    skuTouched.current = true
+    setForm((f) => ({ ...f, sku: e.target.value }))
+  }
+
   function openAdd() {
+    skuTouched.current = false
     setEditingProduct(null)
     setForm(emptyForm)
     setOpen(true)
   }
 
   function openEdit(p: Product) {
+    skuTouched.current = true
     setEditingProduct(p)
     setForm({
       name: p.name,
@@ -170,14 +206,14 @@ export default function ProductsPage() {
   }
 
   const categoryMap = Object.fromEntries(categories.map((c) => [c.id, c.name]))
-  const q = search.trim().toLowerCase()
+  const nq = normalizeQuery(search.trim())
   const visible = products
     .filter((p) => filterCategoryId === 'all' || p.categoryId === filterCategoryId)
     .filter((p) =>
-      !q ||
-      p.name.toLowerCase().includes(q) ||
-      p.sku.toLowerCase().includes(q) ||
-      (p.specification ?? '').toLowerCase().includes(q)
+      !nq ||
+      normalizeQuery(p.name).includes(nq) ||
+      normalizeQuery(p.sku).includes(nq) ||
+      normalizeQuery(p.specification ?? '').includes(nq)
     )
   const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE))
   const paginated = visible.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
@@ -234,20 +270,20 @@ export default function ProductsPage() {
 
                 <div className="space-y-1.5">
                   <Label.Root htmlFor="p-name" className="text-sm font-medium text-gray-700">Name</Label.Root>
-                  <input id="p-name" required value={form.name} onChange={field('name')}
+                  <input id="p-name" required value={form.name} onChange={handleNameChange} onBlur={handleNameBlur}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
 
                 <div className="space-y-1.5">
                   <Label.Root htmlFor="p-sku" className="text-sm font-medium text-gray-700">SKU</Label.Root>
-                  <input id="p-sku" required value={form.sku} onChange={field('sku')}
+                  <input id="p-sku" required value={form.sku} onChange={handleSkuChange}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <Label.Root htmlFor="p-spec" className="text-sm font-medium text-gray-700">Specification / Size <span className="text-gray-400 font-normal">(optional)</span></Label.Root>
-                    <input id="p-spec" value={form.specification} onChange={field('specification')}
+                    <input id="p-spec" value={form.specification} onChange={handleSpecChange}
                       placeholder="e.g. 250ml, 32mm, 3/4&quot;"
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>

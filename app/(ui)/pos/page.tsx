@@ -8,6 +8,7 @@ import { create } from '@/lib/db/transactions'
 import { push, drain } from '@/lib/db/syncQueue'
 import { getAll as getProducts } from '@/lib/db/products'
 import { getAll as getCategories } from '@/lib/db/categories'
+import { normalizeQuery } from '@/lib/normalize'
 import { getAll as getTransactions } from '@/lib/db/transactions'
 import { seedIfEmpty, syncFromServer } from '@/lib/db/seed'
 import { computeStock, getLowStockItems, LOW_STOCK_THRESHOLD } from '@/lib/stock'
@@ -94,14 +95,14 @@ export default function POSPage() {
     load()
   }, [])
 
-  const q = search.trim().toLowerCase()
+  const nq = normalizeQuery(search.trim())
   const visible = products
     .filter((p) => activeCategoryId === 'all' || p.categoryId === activeCategoryId)
     .filter((p) =>
-      !q ||
-      p.name.toLowerCase().includes(q) ||
-      p.sku.toLowerCase().includes(q) ||
-      (p.specification ?? '').toLowerCase().includes(q)
+      !nq ||
+      normalizeQuery(p.name).includes(nq) ||
+      normalizeQuery(p.sku).includes(nq) ||
+      normalizeQuery(p.specification ?? '').includes(nq)
     )
 
   function addToCart(product: Product) {
