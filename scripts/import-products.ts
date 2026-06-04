@@ -78,7 +78,17 @@ function parseLine(line: string): string[] {
   return cols
 }
 
-function parseCsv(filePath: string) {
+type ProductRow = {
+  name: string
+  specification: string | null
+  sku: string
+  quantity: string | null
+  costPrice: number
+  sellingPrice: number
+  category: string
+}
+
+function parseCsv(filePath: string): ProductRow[] {
   const content = fs.readFileSync(filePath, 'utf-8')
   const lines = content.trim().split('\n').slice(1) // skip header
   const skuCount: Record<string, number> = {}
@@ -104,7 +114,7 @@ function parseCsv(filePath: string) {
         category: inferCategory(name.trim()),
       }
     })
-    .filter(Boolean) as NonNullable<ReturnType<typeof parseCsv>[number]>[]
+    .filter((p): p is ProductRow => p !== null)
 }
 
 async function main() {
