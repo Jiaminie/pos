@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, FileText, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { loadSettings, saveSettings, DEFAULT_SETTINGS, type PDFSettings } from '@/lib/settings'
+import { fetchSettings, saveSettings, DEFAULT_SETTINGS, type PDFSettings } from '@/lib/settings'
 
 const COLORS = [
   { label: 'Blue',   value: '#2563eb' },
@@ -18,10 +18,14 @@ const COLORS = [
 export default function SettingsPage() {
   const [settings, setSettings] = useState<PDFSettings>(DEFAULT_SETTINGS)
   const [saved, setSaved] = useState(false)
+  const [loading, setLoading] = useState(true)
   const logoInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    setSettings(loadSettings())
+    fetchSettings().then((s) => {
+      setSettings(s)
+      setLoading(false)
+    })
   }, [])
 
   function set<K extends keyof PDFSettings>(key: K, value: PDFSettings[K]) {
@@ -46,10 +50,14 @@ export default function SettingsPage() {
     if (logoInputRef.current) logoInputRef.current.value = ''
   }
 
-  function handleSave() {
-    saveSettings(settings)
-    setSaved(true)
-    toast.success('Settings saved', { description: 'PDF layout updated.' })
+  async function handleSave() {
+    try {
+      await saveSettings(settings)
+      setSaved(true)
+      toast.success('Settings saved', { description: 'PDF layout updated across all devices.' })
+    } catch {
+      toast.error('Failed to save settings', { description: 'Check your connection and try again.' })
+    }
   }
 
   async function handlePreview() {
@@ -77,6 +85,14 @@ export default function SettingsPage() {
     } catch {
       toast.error('Preview failed')
     }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-sm text-gray-400">
+        Loading settings…
+      </div>
+    )
   }
 
   return (

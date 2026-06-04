@@ -18,6 +18,7 @@ export const DEFAULT_SETTINGS: PDFSettings = {
 
 const KEY = 'pos-pdf-settings'
 
+/** Read from localStorage (used by PDF generation which is always client-side) */
 export function loadSettings(): PDFSettings {
   if (typeof window === 'undefined') return DEFAULT_SETTINGS
   try {
@@ -29,8 +30,42 @@ export function loadSettings(): PDFSettings {
   }
 }
 
-export function saveSettings(s: PDFSettings): void {
+/** Write to localStorage cache */
+export function cacheSettings(s: PDFSettings): void {
+  if (typeof window === 'undefined') return
   localStorage.setItem(KEY, JSON.stringify(s))
+}
+
+/** Fetch from server and cache locally. Returns the authoritative settings. */
+export async function fetchSettings(): Promise<PDFSettings> {
+  try {
+    const res = await fetch('/api/settings')
+    if (!res.ok) throw new Error('fetch failed')
+    const { data } = await res.json()
+    const s: PDFSettings = {
+      companyName:  data.companyName  ?? DEFAULT_SETTINGS.companyName,
+      tagline:      data.tagline      ?? DEFAULT_SETTINGS.tagline,
+      logoDataUrl:  data.logoDataUrl  ?? DEFAULT_SETTINGS.logoDataUrl,
+      primaryColor: data.primaryColor ?? DEFAULT_SETTINGS.primaryColor,
+      currency:     data.currency     ?? DEFAULT_SETTINGS.currency,
+      footerText:   data.footerText   ?? DEFAULT_SETTINGS.footerText,
+    }
+    cacheSettings(s)
+    return s
+  } catch {
+    return loadSettings()
+  }
+}
+
+/** Persist to server and update local cache. */
+export async function saveSettings(s: PDFSettings): Promise<void> {
+  cacheSettings(s)
+  const res = await fetch('/api/settings', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(s),
+  })
+  if (!res.ok) throw new Error('Failed to save settings'  )
 }
 
 /** Convert "#rrggbb" → [r, g, b] */

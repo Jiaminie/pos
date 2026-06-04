@@ -261,7 +261,7 @@ export default function POSPage() {
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 pt-3">
               {visible.map((p) => {
-                const stock = computeStock(p.id, allTransactions)
+                const stock = computeStock(p.id, allTransactions, p.initialStock ?? 0)
                 const isLow = stock < LOW_STOCK_THRESHOLD
                 return (
                   <button key={p.id} onClick={() => addToCart(p)}
@@ -289,7 +289,7 @@ export default function POSPage() {
                       <p className="text-blue-600 font-semibold mt-2">KES {p.sellingPrice.toLocaleString()}</p>
                       {isLow && (
                         <p className="text-xs text-amber-600 font-medium mt-1">
-                          ⚠ {stock} {p.stockUnit ?? 'left'}
+                          {stock === 0 ? '⚠ Out of stock' : `⚠ ${stock} ${p.stockUnit ?? 'left'}`}
                         </p>
                       )}
                     </div>
