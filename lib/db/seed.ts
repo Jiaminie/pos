@@ -20,7 +20,7 @@ async function syncFromServer(): Promise<boolean> {
     let cursor: string | null = null
 
     do {
-      const url = `/api/products?limit=100${cursor ? `&cursor=${cursor}` : ''}`
+      const url: string = `/api/products?limit=100${cursor ? `&cursor=${cursor}` : ''}`
       const res = await fetch(url)
       if (!res.ok) return false
       const { data, meta } = await res.json()
