@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { FileText, Minus, Plus, ShoppingCart, WifiOff, X } from 'lucide-react'
+import { FileText, ImageOff, Minus, Plus, ShoppingCart, WifiOff, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { create } from '@/lib/db/transactions'
 import { push, drain } from '@/lib/db/syncQueue'
@@ -242,22 +242,34 @@ export default function POSPage() {
                 const isLow = stock < LOW_STOCK_THRESHOLD
                 return (
                   <button key={p.id} onClick={() => addToCart(p)}
-                    className={`text-left border rounded-xl p-4 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    className={`text-left border rounded-xl overflow-hidden transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                       isLow
                         ? 'border-amber-300 bg-amber-50 hover:border-amber-400'
                         : 'border-gray-200 hover:border-blue-400 hover:bg-blue-50'
                     }`}>
-                    <p className="font-medium text-sm leading-snug">{p.name}</p>
-                    <p className="text-xs text-gray-400 font-mono mt-0.5">{p.sku}</p>
-                    {p.specification && (
-                      <p className="text-xs text-gray-500 mt-0.5">{p.specification}</p>
+                    {/* Image */}
+                    {p.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={p.imageUrl} alt={p.name} className="w-full h-28 object-cover" />
+                    ) : (
+                      <div className={`w-full h-28 flex items-center justify-center ${isLow ? 'bg-amber-100/60' : 'bg-gray-100'}`}>
+                        <ImageOff size={22} className="text-gray-300" />
+                      </div>
                     )}
-                    <p className="text-blue-600 font-semibold mt-2">KES {p.sellingPrice.toLocaleString()}</p>
-                    {isLow && (
-                      <p className="text-xs text-amber-600 font-medium mt-1">
-                        ⚠ {stock} {p.stockUnit ?? 'left'}
-                      </p>
-                    )}
+                    {/* Info */}
+                    <div className="p-3">
+                      <p className="font-medium text-sm leading-snug">{p.name}</p>
+                      <p className="text-xs text-gray-400 font-mono mt-0.5">{p.sku}</p>
+                      {p.specification && (
+                        <p className="text-xs text-gray-500 mt-0.5">{p.specification}</p>
+                      )}
+                      <p className="text-blue-600 font-semibold mt-2">KES {p.sellingPrice.toLocaleString()}</p>
+                      {isLow && (
+                        <p className="text-xs text-amber-600 font-medium mt-1">
+                          ⚠ {stock} {p.stockUnit ?? 'left'}
+                        </p>
+                      )}
+                    </div>
                   </button>
                 )
               })}
