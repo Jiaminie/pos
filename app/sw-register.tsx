@@ -5,6 +5,17 @@ export default function ServiceWorkerRegistration() {
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
 
+    // In development the service worker only causes grief: it serves stale
+    // cached JS chunks while the dev server hands out fresh source, producing
+    // impossible-looking errors. Unregister any existing SW and bail out.
+    if (process.env.NODE_ENV !== "production") {
+      navigator.serviceWorker.getRegistrations().then((regs) => {
+        regs.forEach((reg) => reg.unregister());
+      });
+      caches?.keys?.().then((keys) => keys.forEach((k) => caches.delete(k)));
+      return;
+    }
+
     // Whether this page was already controlled by a SW when it loaded. We only
     // want to auto-reload when an EXISTING worker is replaced by a new one
     // (a real deploy/update) — never on the very first install of the SW.

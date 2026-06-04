@@ -339,11 +339,9 @@ export default function ProductsPage() {
                   <td className="px-4 py-3 text-right">{p.sellingPrice.toLocaleString()}</td>
                   <td className="px-4 py-3 text-right text-gray-500">{p.costPrice.toLocaleString()}</td>
                   <td className="px-4 py-3">
-                    <Dialog.Trigger asChild>
-                      <button onClick={() => openEdit(p)} className="p-1.5 rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
-                        <Pencil size={14} />
-                      </button>
-                    </Dialog.Trigger>
+                    <button onClick={() => openEdit(p)} className="p-1.5 rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
+                      <Pencil size={14} />
+                    </button>
                   </td>
                 </tr>
               ))}
