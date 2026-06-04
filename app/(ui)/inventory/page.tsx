@@ -4,12 +4,14 @@ import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Select from '@radix-ui/react-select'
 import * as Label from '@radix-ui/react-label'
-import { ChevronDown, PackagePlus, X } from 'lucide-react'
+import { AlertTriangle, ChevronDown, PackagePlus, X } from 'lucide-react'
+import { toast } from 'sonner'
 import { create, getAll as getTransactions } from '@/lib/db/transactions'
-import { push } from '@/lib/db/syncQueue'
+import { push, drain } from '@/lib/db/syncQueue'
 import { getAll as getProducts } from '@/lib/db/products'
 import { getAll as getCategories } from '@/lib/db/categories'
 import { seedIfEmpty, syncFromServer } from '@/lib/db/seed'
+import { computeStock, getLowStockItems, LOW_STOCK_THRESHOLD } from '@/lib/stock'
 import type { InventoryTransaction, Product, ProductCategory } from '@/lib/types'
 
 const TYPE_LABELS: Record<string, string> = {
@@ -33,6 +35,9 @@ export default function InventoryPage() {
   const [qty, setQty] = useState('')
   const [filterCategoryId, setFilterCategoryId] = useState<string>('all')
   const [saving, setSaving] = useState(false)
+  // per-item restock qty in the low-stock panel
+  const [restockQtys, setRestockQtys] = useState<Record<string, string>>({})
+  const [restocking, setRestocking] = useState<Record<string, boolean>>({})
 
   async function refreshLocal() {
     const [cats, prods, txs] = await Promise.all([getCategories(), getProducts(), getTransactions()])
@@ -65,23 +70,49 @@ export default function InventoryPage() {
     ? products
     : products.filter((p) => p.categoryId === filterCategoryId)
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setSaving(true)
+  const lowStockItems = getLowStockItems(products, transactions)
+
+  const selectedProductStock = productId ? computeStock(productId, transactions) : null
+
+  async function stockIn(pid: string, quantity: number): Promise<void> {
     const tx: InventoryTransaction = {
       id: crypto.randomUUID(),
       type: 'STOCK_IN',
-      productId,
-      quantity: parseInt(qty, 10),
+      productId: pid,
+      quantity,
       createdAt: new Date().toISOString(),
     }
     await create(tx)
     await push(tx)
+    drain().catch(() => {})
     setTransactions((prev) => [tx, ...prev])
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!productId || !qty) return
+    setSaving(true)
+    await stockIn(productId, parseInt(qty, 10))
+    const name = productMap[productId]?.name ?? productId
+    toast.success(`Stocked in — ${name}`, { description: `+${qty} units added` })
     setProductId('')
     setQty('')
     setOpen(false)
     setSaving(false)
+  }
+
+  async function handleQuickRestock(pid: string) {
+    const q = parseInt(restockQtys[pid] ?? '', 10)
+    if (!q || q < 1) {
+      toast.error('Enter a valid quantity')
+      return
+    }
+    setRestocking((r) => ({ ...r, [pid]: true }))
+    await stockIn(pid, q)
+    const name = productMap[pid]?.name ?? pid
+    toast.success(`Restocked — ${name}`, { description: `+${q} units added` })
+    setRestockQtys((r) => ({ ...r, [pid]: '' }))
+    setRestocking((r) => ({ ...r, [pid]: false }))
   }
 
   return (
@@ -142,19 +173,33 @@ export default function InventoryPage() {
                     <Select.Portal>
                       <Select.Content className="bg-white border border-gray-200 rounded-xl shadow-lg z-[60] overflow-hidden">
                         <Select.Viewport className="p-1">
-                          {visibleProducts.map((p) => (
-                            <Select.Item key={p.id} value={p.id} className="flex items-center px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-blue-50 focus:bg-blue-50 focus:outline-none">
-                              <Select.ItemText>{p.name}</Select.ItemText>
-                            </Select.Item>
-                          ))}
+                          {visibleProducts.map((p) => {
+                            const stock = computeStock(p.id, transactions)
+                            return (
+                              <Select.Item key={p.id} value={p.id} className="flex items-center justify-between px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-blue-50 focus:bg-blue-50 focus:outline-none">
+                                <Select.ItemText>{p.name}</Select.ItemText>
+                                {stock < LOW_STOCK_THRESHOLD && (
+                                  <span className="ml-2 text-xs text-amber-600 font-medium shrink-0">{stock} left</span>
+                                )}
+                              </Select.Item>
+                            )
+                          })}
                         </Select.Viewport>
                       </Select.Content>
                     </Select.Portal>
                   </Select.Root>
+                  {selectedProductStock !== null && (
+                    <p className="text-xs text-gray-500">
+                      Current stock:&nbsp;
+                      <span className={selectedProductStock < LOW_STOCK_THRESHOLD ? 'text-amber-600 font-semibold' : 'font-medium'}>
+                        {selectedProductStock} units
+                      </span>
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label.Root htmlFor="qty" className="text-sm font-medium text-gray-700">Quantity</Label.Root>
+                  <Label.Root htmlFor="qty" className="text-sm font-medium text-gray-700">Quantity to add</Label.Root>
                   <input id="qty" required type="number" min="1" value={qty} onChange={(e) => setQty(e.target.value)}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
@@ -174,6 +219,51 @@ export default function InventoryPage() {
         </Dialog.Root>
       </div>
 
+      {/* ── Low stock restock panel ───────────────────────────────── */}
+      {lowStockItems.length > 0 && (
+        <div className="mb-6 border border-amber-200 rounded-xl overflow-hidden">
+          <div className="bg-amber-50 px-4 py-3 flex items-center gap-2 border-b border-amber-200">
+            <AlertTriangle size={15} className="text-amber-600 shrink-0" />
+            <p className="text-sm font-semibold text-amber-800">
+              {lowStockItems.length} item{lowStockItems.length !== 1 ? 's' : ''} need restocking
+            </p>
+          </div>
+          <div className="divide-y divide-amber-100">
+            {lowStockItems.map(({ product, stock }) => (
+              <div key={product.id} className="flex items-center gap-3 px-4 py-3 bg-white hover:bg-amber-50/40 transition-colors">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{product.name}</p>
+                  <p className="text-xs text-gray-400 font-mono">{product.sku}</p>
+                </div>
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${
+                  stock === 0 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                }`}>
+                  {stock === 0 ? 'Out of stock' : `${stock} left`}
+                </span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Qty"
+                    value={restockQtys[product.id] ?? ''}
+                    onChange={(e) => setRestockQtys((r) => ({ ...r, [product.id]: e.target.value }))}
+                    className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    onClick={() => handleQuickRestock(product.id)}
+                    disabled={restocking[product.id]}
+                    className="px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors whitespace-nowrap"
+                  >
+                    {restocking[product.id] ? '…' : 'Restock'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Transaction log ───────────────────────────────────────── */}
       {transactions.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 text-gray-500">
           <p className="text-sm">No transactions yet</p>

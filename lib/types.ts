@@ -11,7 +11,8 @@ export type Product = {
   costPrice: number
   categoryId: string
   imageUrl?: string
-  category?: ProductCategory // optional join
+  initialStock?: number     // parsed from quantity string on server sync
+  category?: ProductCategory
 }
 
 export type TransactionType = 'SALE' | 'STOCK_IN' | 'ADJUSTMENT'

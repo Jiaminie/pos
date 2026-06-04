@@ -5,7 +5,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { FileText, Minus, Plus, ShoppingCart, WifiOff, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { create } from '@/lib/db/transactions'
-import { push } from '@/lib/db/syncQueue'
+import { push, drain } from '@/lib/db/syncQueue'
 import { getAll as getProducts } from '@/lib/db/products'
 import { getAll as getCategories } from '@/lib/db/categories'
 import { getAll as getTransactions } from '@/lib/db/transactions'
@@ -36,13 +36,15 @@ export default function POSPage() {
   const alertedIds = useRef<Set<string>>(new Set())
 
   useEffect(() => {
-    const sync = () => setOffline(!navigator.onLine)
-    sync()
-    window.addEventListener('online', sync)
-    window.addEventListener('offline', sync)
+    const onOnline = () => { setOffline(false); drain().catch(() => {}) }
+    const onOffline = () => setOffline(true)
+    setOffline(!navigator.onLine)
+    window.addEventListener('online', onOnline)
+    window.addEventListener('offline', onOffline)
+    drain().catch(() => {}) // drain any queued transactions from previous offline sessions
     return () => {
-      window.removeEventListener('online', sync)
-      window.removeEventListener('offline', sync)
+      window.removeEventListener('online', onOnline)
+      window.removeEventListener('offline', onOffline)
     }
   }, [])
 
@@ -73,15 +75,20 @@ export default function POSPage() {
         if (c.length > 0) setActiveCategoryId(c[0].id)
       }
 
-      // Show toasts for items that are already low on load
+      // Single consolidated toast on load — never spam per-item
       const low = getLowStockItems(prods, txs)
-      low.forEach(({ product, stock }) => {
-        alertedIds.current.add(product.id)
-        toast.warning(`Low stock: ${product.name}`, {
-          description: `Only ${stock} unit${stock !== 1 ? 's' : ''} left (threshold: ${LOW_STOCK_THRESHOLD})`,
-          duration: 6000,
+      low.forEach(({ product }) => alertedIds.current.add(product.id))
+      if (low.length === 1) {
+        toast.warning(`Low stock: ${low[0].product.name}`, {
+          description: `Only ${low[0].stock} unit${low[0].stock !== 1 ? 's' : ''} left — check Reports`,
+          duration: 5000,
         })
-      })
+      } else if (low.length > 1) {
+        toast.warning(`${low.length} items are low on stock`, {
+          description: 'Visit Reports to see the full list and restock.',
+          duration: 5000,
+        })
+      }
     }
     load()
   }, [])
@@ -131,17 +138,26 @@ export default function POSPage() {
     setReceipt({ orderId, items: [...cart], total: subtotal })
     setCart([])
     setChecking(false)
+    drain().catch(() => {}) // flush to server immediately if online
 
-    // Check for newly low-stock items and fire toasts + email
+    // After checkout: toast only for items that JUST dropped below threshold
     const nowLow = getLowStockItems(products, updatedTxs)
     const newlyLow = nowLow.filter(({ product }) => !alertedIds.current.has(product.id))
-    newlyLow.forEach(({ product, stock }) => {
-      alertedIds.current.add(product.id)
+    newlyLow.forEach(({ product }) => alertedIds.current.add(product.id))
+
+    const TOAST_LIMIT = 3
+    newlyLow.slice(0, TOAST_LIMIT).forEach(({ product, stock }) => {
       toast.warning(`Low stock: ${product.name}`, {
-        description: `Only ${stock} unit${stock !== 1 ? 's' : ''} remaining — please restock`,
-        duration: 8000,
+        description: `Only ${stock} unit${stock !== 1 ? 's' : ''} remaining`,
+        duration: 7000,
       })
     })
+    if (newlyLow.length > TOAST_LIMIT) {
+      toast.warning(`${newlyLow.length - TOAST_LIMIT} more items just went low`, {
+        description: 'Visit Reports to see the full list.',
+        duration: 7000,
+      })
+    }
 
     if (newlyLow.length > 0) {
       fetch('/api/alerts/low-stock', {

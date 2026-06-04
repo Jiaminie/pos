@@ -6,8 +6,15 @@ function slugify(str: string): string {
   return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
 
+function parseInitialStock(qty: string | null | undefined): number {
+  if (!qty) return 0
+  // Sum all integers in the string: "300 pcs + 140" → 440, "10 pcs" → 10
+  const nums = qty.match(/\d+/g)
+  return nums ? nums.reduce((s, n) => s + parseInt(n, 10), 0) : 0
+}
+
 const SYNC_TTL = 5 * 60 * 1000 // 5 minutes
-const SYNC_TS_KEY = 'pos_last_sync'
+const SYNC_TS_KEY = 'pos_last_sync_v2' // bumped to force re-sync with initialStock
 
 export async function syncFromServer(): Promise<boolean> {
   if (typeof window !== 'undefined') {
@@ -41,6 +48,7 @@ export async function syncFromServer(): Promise<boolean> {
           costPrice: Number(p.costPrice),
           categoryId: p.category ? slugify(p.category) : 'uncategorised',
           imageUrl: p.imageUrl ?? undefined,
+          initialStock: parseInitialStock(p.quantity),
         })
       }
 

@@ -96,7 +96,7 @@ export default function ReportsPage() {
       sold,
       stocked,
       revenue:   sold * (p?.sellingPrice ?? 0),
-      netStock:  computeStock(id, transactions),
+      netStock:  computeStock(id, transactions, p?.initialStock ?? 0),
     }
   }).sort((a, b) => b.revenue - a.revenue)
 
