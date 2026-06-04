@@ -61,8 +61,8 @@ export default function ProductsPage() {
     body.append('file', file)
     const res = await fetch('/api/upload', { method: 'POST', body })
     if (res.ok) {
-      const { url } = await res.json()
-      setForm((f) => ({ ...f, imageUrl: url }))
+      const { data } = await res.json()
+      setForm((f) => ({ ...f, imageUrl: data?.url ?? '' }))
     }
     setUploading(false)
   }
