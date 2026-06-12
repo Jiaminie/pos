@@ -12,6 +12,28 @@ export async function upsertMany(products: Product[]): Promise<void> {
   })
 }
 
+export async function clearAll(): Promise<void> {
+  const db = await openDb()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('products', 'readwrite')
+    tx.objectStore('products').clear()
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
+export async function replaceAll(products: Product[]): Promise<void> {
+  const db = await openDb()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('products', 'readwrite')
+    const store = tx.objectStore('products')
+    store.clear()
+    for (const product of products) store.add(product)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
 export async function getAll(): Promise<Product[]> {
   const db = await openDb()
   return new Promise((resolve, reject) => {

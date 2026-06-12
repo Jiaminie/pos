@@ -39,8 +39,14 @@ export async function GET(request: NextRequest) {
     const page = hasMore ? products.slice(0, limit) : products;
     const nextCursor = hasMore ? page[page.length - 1].id : null;
 
+    // Total count on first page only — used for sync progress UI
+    const total =
+      !cursor && !category && !search
+        ? await prisma.product.count({ where })
+        : undefined;
+
     return Response.json(
-      { data: page, meta: { nextCursor, hasMore }, error: null },
+      { data: page, meta: { nextCursor, hasMore, total }, error: null },
       { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300' } }
     );
   } catch (err) {

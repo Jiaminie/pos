@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Check, FileText, Upload, X } from 'lucide-react'
+import { Building2, Check, FileText, Percent, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { fetchSettings, saveSettings, DEFAULT_SETTINGS, type PDFSettings } from '@/lib/settings'
 
@@ -15,10 +15,19 @@ const COLORS = [
   { label: 'Gray',   value: '#374151' },
 ]
 
+type SettingsTab = 'store' | 'pricing' | 'documents'
+
+const TABS: { id: SettingsTab; label: string; description: string; icon: typeof Building2 }[] = [
+  { id: 'store',     label: 'Store',     description: 'Name, logo & branding',     icon: Building2 },
+  { id: 'pricing',   label: 'Pricing',   description: 'POS discount rules',        icon: Percent },
+  { id: 'documents', label: 'Documents', description: 'PDF reports & quotations', icon: FileText },
+]
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<PDFSettings>(DEFAULT_SETTINGS)
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState<SettingsTab>('store')
   const logoInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -54,7 +63,7 @@ export default function SettingsPage() {
     try {
       await saveSettings(settings)
       setSaved(true)
-      toast.success('Settings saved', { description: 'PDF layout updated across all devices.' })
+      toast.success('Settings saved', { description: 'Changes apply across all devices.' })
     } catch {
       toast.error('Failed to save settings', { description: 'Check your connection and try again.' })
     }
@@ -95,196 +104,340 @@ export default function SettingsPage() {
     )
   }
 
+  const activeMeta = TABS.find((t) => t.id === activeTab)!
+
   return (
-    <div className="flex-1 overflow-y-auto p-6">
-      <div className="max-w-2xl mx-auto">
-        <div className="mb-8">
-          <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-          <p className="text-sm text-gray-500 mt-1">Customize how your PDF reports and quotations look.</p>
+    <div className="flex-1 flex flex-col lg:flex-row overflow-hidden bg-gray-50/50">
+      {/* Sidebar nav — desktop */}
+      <aside className="hidden lg:flex lg:w-60 shrink-0 flex-col border-r border-gray-200 bg-white">
+        <div className="px-5 py-6 border-b border-gray-100">
+          <h1 className="text-lg font-semibold tracking-tight">Settings</h1>
+          <p className="text-xs text-gray-500 mt-1">Manage your store</p>
+        </div>
+        <nav className="flex-1 p-3 space-y-0.5">
+          {TABS.map(({ id, label, description, icon: Icon }) => {
+            const active = activeTab === id
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setActiveTab(id)}
+                className={`w-full text-left rounded-xl px-3 py-2.5 transition-colors ${
+                  active
+                    ? 'bg-blue-50 text-blue-700'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Icon size={16} className={active ? 'text-blue-600' : 'text-gray-400'} />
+                  <span className="text-sm font-medium">{label}</span>
+                </div>
+                <p className={`text-xs mt-0.5 pl-[26px] ${active ? 'text-blue-600/70' : 'text-gray-400'}`}>
+                  {description}
+                </p>
+              </button>
+            )
+          })}
+        </nav>
+      </aside>
+
+      {/* Main content */}
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        {/* Mobile header + tab bar */}
+        <div className="shrink-0 border-b border-gray-200 bg-white lg:bg-transparent">
+          <div className="px-5 pt-5 pb-3 lg:px-8 lg:pt-8">
+            <div className="lg:hidden mb-4">
+              <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
+              <p className="text-xs text-gray-500 mt-0.5">Manage your store</p>
+            </div>
+            <nav className="flex gap-1 overflow-x-auto pb-1 lg:hidden scrollbar-none">
+              {TABS.map(({ id, label, icon: Icon }) => {
+                const active = activeTab === id
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setActiveTab(id)}
+                    className={`flex items-center gap-1.5 shrink-0 px-3.5 py-2 rounded-full text-sm font-medium transition-colors ${
+                      active
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    <Icon size={14} />
+                    {label}
+                  </button>
+                )
+              })}
+            </nav>
+          </div>
         </div>
 
-        <div className="space-y-6">
+        {/* Panel header + actions */}
+        <div className="shrink-0 flex items-center justify-between gap-4 px-5 py-4 lg:px-8 border-b border-gray-200 bg-white">
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-gray-900">{activeMeta.label}</h2>
+            <p className="text-xs text-gray-500 mt-0.5 hidden sm:block">{activeMeta.description}</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {activeTab === 'documents' && (
+              <button
+                type="button"
+                onClick={handlePreview}
+                className="hidden sm:flex items-center gap-1.5 border border-gray-300 px-3 py-2 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <FileText size={14} />
+                Preview PDF
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleSave}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium transition-colors ${
+                saved
+                  ? 'bg-green-600 text-white hover:bg-green-700'
+                  : 'bg-blue-600 text-white hover:bg-blue-700'
+              }`}
+            >
+              {saved ? <Check size={14} /> : null}
+              {saved ? 'Saved' : 'Save'}
+            </button>
+          </div>
+        </div>
 
-          {/* Company Identity */}
-          <section className="border border-gray-200 rounded-xl overflow-hidden">
-            <div className="bg-gray-50 px-5 py-3 border-b border-gray-200">
-              <h2 className="text-sm font-semibold text-gray-700">Company Identity</h2>
-            </div>
-            <div className="p-5 space-y-4">
+        {/* Scrollable panel body */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-2xl mx-auto px-5 py-6 lg:px-8 lg:py-8">
+            {activeTab === 'store' && (
+              <div className="space-y-6">
+                <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-5">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-800">Logo</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">Shown on PDF reports and quotations.</p>
+                  </div>
+                  {settings.logoDataUrl ? (
+                    <div className="flex items-center gap-4">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={settings.logoDataUrl} alt="Logo" className="h-16 w-16 object-contain border border-gray-200 rounded-xl p-1.5 bg-gray-50" />
+                      <div className="space-y-2">
+                        <p className="text-xs text-gray-500">Logo uploaded</p>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => logoInputRef.current?.click()}
+                            className="text-xs text-blue-600 hover:underline"
+                          >
+                            Replace
+                          </button>
+                          <button type="button" onClick={removeLogo} className="text-xs text-red-500 hover:text-red-600 flex items-center gap-1">
+                            <X size={12} /> Remove
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => logoInputRef.current?.click()}
+                      className="w-full flex flex-col items-center gap-2 border border-dashed border-gray-300 rounded-xl px-4 py-8 text-sm text-gray-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/30 transition-colors"
+                    >
+                      <Upload size={20} className="text-gray-400" />
+                      Upload logo (PNG/JPG, max 500 KB)
+                    </button>
+                  )}
+                  <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
+                </section>
 
-              {/* Logo */}
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-2">Logo</label>
-                {settings.logoDataUrl ? (
-                  <div className="flex items-center gap-3">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={settings.logoDataUrl} alt="Logo" className="h-12 w-12 object-contain border border-gray-200 rounded-lg p-1" />
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">Logo uploaded</p>
-                      <button onClick={removeLogo} className="text-xs text-red-500 hover:text-red-600 flex items-center gap-1">
-                        <X size={12} /> Remove
-                      </button>
+                <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-800">Business details</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">Used across the app and on exported documents.</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-gray-700">Company name</label>
+                    <input
+                      type="text"
+                      value={settings.companyName}
+                      onChange={(e) => set('companyName', e.target.value)}
+                      placeholder="My Business"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-gray-700">
+                      Tagline <span className="text-gray-400 font-normal">(optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={settings.tagline}
+                      onChange={(e) => set('tagline', e.target.value)}
+                      placeholder="Quality products, trusted service"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-gray-700">Currency symbol</label>
+                    <input
+                      type="text"
+                      value={settings.currency}
+                      onChange={(e) => set('currency', e.target.value)}
+                      placeholder="KES"
+                      maxLength={6}
+                      className="w-28 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </section>
+              </div>
+            )}
+
+            {activeTab === 'pricing' && (
+              <div className="space-y-6">
+                <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-800">Discount floor rule</h3>
+                    <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
+                      Controls the lowest price cashiers can sell at in POS. Discount = selling price − negotiated price.
+                    </p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-gray-700">Minimum markup on cost</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={0}
+                        max={1000}
+                        step={1}
+                        value={settings.minMarkupPercent}
+                        onChange={(e) => set('minMarkupPercent', Math.max(0, parseFloat(e.target.value) || 0))}
+                        className="w-28 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <span className="text-sm text-gray-500">%</span>
                     </div>
                   </div>
-                ) : (
-                  <button
-                    onClick={() => logoInputRef.current?.click()}
-                    className="flex items-center gap-2 border border-dashed border-gray-300 rounded-lg px-4 py-3 text-sm text-gray-500 hover:border-blue-400 hover:text-blue-600 transition-colors"
-                  >
-                    <Upload size={16} />
-                    Upload logo (PNG/JPG, max 500 KB)
-                  </button>
-                )}
-                <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
+                </section>
+
+                <section className="bg-amber-50/60 border border-amber-200/80 rounded-xl p-5 space-y-3">
+                  <h3 className="text-xs font-semibold text-amber-900 uppercase tracking-wide">How it works</h3>
+                  <ol className="text-xs text-amber-900/80 space-y-2 list-decimal list-inside leading-relaxed">
+                    <li>Floor = cost × (markup% ÷ 100). At 150%, cost KES 100 → floor KES 150.</li>
+                    <li>Floor is capped at selling price — no discount if markup exceeds list price.</li>
+                    <li>Per-product <strong className="font-medium">Lowest price</strong> can raise the floor, never lower it.</li>
+                  </ol>
+                  <div className="rounded-lg bg-white border border-amber-200/60 p-3 text-xs font-mono text-gray-700 space-y-1">
+                    <p>cost = 100 · sell = 200 · markup = {settings.minMarkupPercent}%</p>
+                    <p className="text-amber-700 font-semibold">
+                      floor = min(200, 100 × {settings.minMarkupPercent / 100}) = {Math.min(200, 100 * settings.minMarkupPercent / 100).toLocaleString()}
+                    </p>
+                    <p className="text-gray-500">max discount per unit = {Math.max(0, 200 - Math.min(200, 100 * settings.minMarkupPercent / 100)).toLocaleString()}</p>
+                  </div>
+                </section>
               </div>
+            )}
 
-              {/* Company Name */}
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Company Name</label>
-                <input
-                  type="text"
-                  value={settings.companyName}
-                  onChange={(e) => set('companyName', e.target.value)}
-                  placeholder="My Business"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              {/* Tagline */}
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Tagline <span className="text-gray-400 font-normal">(optional)</span></label>
-                <input
-                  type="text"
-                  value={settings.tagline}
-                  onChange={(e) => set('tagline', e.target.value)}
-                  placeholder="Quality products, trusted service"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-          </section>
-
-          {/* PDF Style */}
-          <section className="border border-gray-200 rounded-xl overflow-hidden">
-            <div className="bg-gray-50 px-5 py-3 border-b border-gray-200">
-              <h2 className="text-sm font-semibold text-gray-700">PDF Style</h2>
-            </div>
-            <div className="p-5 space-y-4">
-
-              {/* Primary colour */}
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-2">Primary Colour</label>
-                <div className="flex flex-wrap gap-2">
-                  {COLORS.map(({ label, value }) => (
-                    <button
-                      key={value}
-                      title={label}
-                      onClick={() => set('primaryColor', value)}
-                      className="relative w-8 h-8 rounded-full border-2 transition-transform hover:scale-110"
-                      style={{
-                        backgroundColor: value,
-                        borderColor: settings.primaryColor === value ? value : 'transparent',
-                        outline: settings.primaryColor === value ? `2px solid ${value}` : undefined,
-                        outlineOffset: settings.primaryColor === value ? '2px' : undefined,
-                      }}
-                    >
-                      {settings.primaryColor === value && (
-                        <Check size={14} className="absolute inset-0 m-auto text-white" />
-                      )}
-                    </button>
-                  ))}
-                  {/* Custom colour */}
-                  <label className="relative w-8 h-8 rounded-full border border-gray-300 overflow-hidden cursor-pointer hover:scale-110 transition-transform" title="Custom colour">
-                    <input
-                      type="color"
-                      value={settings.primaryColor}
-                      onChange={(e) => set('primaryColor', e.target.value)}
-                      className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
-                    />
-                    <span className="flex items-center justify-center h-full text-gray-400 text-xs">+</span>
-                  </label>
-                </div>
-              </div>
-
-              {/* Currency */}
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Currency Symbol</label>
-                <input
-                  type="text"
-                  value={settings.currency}
-                  onChange={(e) => set('currency', e.target.value)}
-                  placeholder="KES"
-                  maxLength={6}
-                  className="w-28 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              {/* Footer text */}
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Footer Text</label>
-                <input
-                  type="text"
-                  value={settings.footerText}
-                  onChange={(e) => set('footerText', e.target.value)}
-                  placeholder="Thank you for your business."
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <p className="text-xs text-gray-400 mt-1">Appears at the bottom of every PDF page alongside the page number.</p>
-              </div>
-            </div>
-          </section>
-
-          {/* PDF Layout preview description */}
-          <section className="border border-gray-200 rounded-xl overflow-hidden">
-            <div className="bg-gray-50 px-5 py-3 border-b border-gray-200">
-              <h2 className="text-sm font-semibold text-gray-700">Report Layout</h2>
-            </div>
-            <div className="p-5">
-              <div className="border border-gray-200 rounded-lg p-4 bg-white text-xs text-gray-600 space-y-2 font-mono">
-                <div className="flex items-center gap-3 pb-2 border-b border-gray-100">
-                  <div className="w-8 h-8 bg-gray-200 rounded flex items-center justify-center text-gray-400">img</div>
+            {activeTab === 'documents' && (
+              <div className="space-y-6">
+                <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
                   <div>
-                    <p className="font-semibold text-gray-800">{settings.companyName || 'Company Name'}</p>
-                    {settings.tagline && <p className="text-gray-400">{settings.tagline}</p>}
+                    <h3 className="text-sm font-semibold text-gray-800">PDF appearance</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">Colours and footer for reports and quotations.</p>
                   </div>
-                </div>
-                <div className="h-0.5 rounded" style={{ backgroundColor: settings.primaryColor }} />
-                <div className="rounded p-2" style={{ backgroundColor: '#f3f4f6' }}>
-                  <p className="font-bold" style={{ color: settings.primaryColor }}>Key Performance Indicators</p>
-                  <div className="grid grid-cols-4 gap-2 mt-1">
-                    {['Revenue', 'Units Sold', 'Low Stock', 'Margin'].map((k) => (
-                      <div key={k}>
-                        <p className="text-gray-400">{k}</p>
-                        <p className="font-bold text-gray-800">—</p>
-                      </div>
-                    ))}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-gray-700">Primary colour</label>
+                    <div className="flex flex-wrap gap-2">
+                      {COLORS.map(({ label, value }) => (
+                        <button
+                          key={value}
+                          type="button"
+                          title={label}
+                          onClick={() => set('primaryColor', value)}
+                          className="relative w-8 h-8 rounded-full border-2 transition-transform hover:scale-110"
+                          style={{
+                            backgroundColor: value,
+                            borderColor: settings.primaryColor === value ? value : 'transparent',
+                            outline: settings.primaryColor === value ? `2px solid ${value}` : undefined,
+                            outlineOffset: settings.primaryColor === value ? '2px' : undefined,
+                          }}
+                        >
+                          {settings.primaryColor === value && (
+                            <Check size={14} className="absolute inset-0 m-auto text-white" />
+                          )}
+                        </button>
+                      ))}
+                      <label className="relative w-8 h-8 rounded-full border border-gray-300 overflow-hidden cursor-pointer hover:scale-110 transition-transform" title="Custom colour">
+                        <input
+                          type="color"
+                          value={settings.primaryColor}
+                          onChange={(e) => set('primaryColor', e.target.value)}
+                          className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
+                        />
+                        <span className="flex items-center justify-center h-full text-gray-400 text-xs">+</span>
+                      </label>
+                    </div>
                   </div>
-                </div>
-                <div className="rounded p-2" style={{ backgroundColor: '#f3f4f6' }}>
-                  <p className="font-bold" style={{ color: settings.primaryColor }}>Product Breakdown</p>
-                  <p className="text-gray-400 mt-1">Full table with sold / stocked / revenue / net stock per product</p>
-                </div>
-                <p className="text-gray-400 border-t border-gray-100 pt-2">{settings.footerText || 'Footer text'} · Page 1 of N</p>
-              </div>
-            </div>
-          </section>
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-gray-700">Footer text</label>
+                    <input
+                      type="text"
+                      value={settings.footerText}
+                      onChange={(e) => set('footerText', e.target.value)}
+                      placeholder="Thank you for your business."
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <p className="text-xs text-gray-400">Appears at the bottom of every PDF page with the page number.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handlePreview}
+                    className="sm:hidden w-full flex items-center justify-center gap-2 border border-gray-300 px-4 py-2.5 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <FileText size={15} />
+                    Preview PDF
+                  </button>
+                </section>
 
-          {/* Actions */}
-          <div className="flex gap-3 pb-8">
-            <button
-              onClick={handlePreview}
-              className="flex items-center gap-2 border border-gray-300 px-4 py-2.5 rounded-xl text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-            >
-              <FileText size={15} />
-              Preview PDF
-            </button>
-            <button
-              onClick={handleSave}
-              className="flex-1 flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors"
-            >
-              {saved ? <Check size={15} /> : null}
-              {saved ? 'Saved' : 'Save Settings'}
-            </button>
+                <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                  <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
+                    <h3 className="text-sm font-semibold text-gray-800">Live preview</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">Report header and KPI block</p>
+                  </div>
+                  <div className="p-5">
+                    <div className="border border-gray-200 rounded-lg p-4 bg-white text-xs text-gray-600 space-y-2 font-mono shadow-sm">
+                      <div className="flex items-center gap-3 pb-2 border-b border-gray-100">
+                        {settings.logoDataUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={settings.logoDataUrl} alt="" className="w-8 h-8 object-contain rounded" />
+                        ) : (
+                          <div className="w-8 h-8 bg-gray-200 rounded flex items-center justify-center text-gray-400">img</div>
+                        )}
+                        <div>
+                          <p className="font-semibold text-gray-800">{settings.companyName || 'Company Name'}</p>
+                          {settings.tagline && <p className="text-gray-400">{settings.tagline}</p>}
+                        </div>
+                      </div>
+                      <div className="h-0.5 rounded" style={{ backgroundColor: settings.primaryColor }} />
+                      <div className="rounded p-2" style={{ backgroundColor: '#f3f4f6' }}>
+                        <p className="font-bold" style={{ color: settings.primaryColor }}>Key Performance Indicators</p>
+                        <div className="grid grid-cols-4 gap-2 mt-1">
+                          {['Revenue', 'Units Sold', 'Low Stock', 'Margin'].map((k) => (
+                            <div key={k}>
+                              <p className="text-gray-400">{k}</p>
+                              <p className="font-bold text-gray-800">—</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="rounded p-2" style={{ backgroundColor: '#f3f4f6' }}>
+                        <p className="font-bold" style={{ color: settings.primaryColor }}>Product Breakdown</p>
+                        <p className="text-gray-400 mt-1">Sold / stocked / revenue / net stock per product</p>
+                      </div>
+                      <p className="text-gray-400 border-t border-gray-100 pt-2">
+                        {settings.footerText || 'Footer text'} · Page 1 of N
+                      </p>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            )}
           </div>
         </div>
       </div>

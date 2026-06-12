@@ -1,18 +1,26 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Label from '@radix-ui/react-label'
 import * as Select from '@radix-ui/react-select'
-import { Camera, ChevronDown, ChevronLeft, ChevronRight, Pencil, Plus, Search, X } from 'lucide-react'
+import { AlertTriangle, Camera, ChevronDown, ChevronLeft, ChevronRight, Pencil, Plus, RefreshCw, Search, Upload, X } from 'lucide-react'
+import { CategoryPicker } from '@/components/pos/CategoryPicker'
+import { BulkUploadWizard } from '@/components/products/BulkUploadWizard'
+import { CatalogSyncOverlay } from '@/components/products/CatalogSyncOverlay'
 import { toast } from 'sonner'
 import { getAll as getProducts, upsertMany } from '@/lib/db/products'
 import { getAll as getCategories, upsertMany as upsertCategories } from '@/lib/db/categories'
 import { create as createTx, getAll as getTransactions } from '@/lib/db/transactions'
 import { push as pushTx, drain } from '@/lib/db/syncQueue'
-import { seedIfEmpty, syncFromServer } from '@/lib/db/seed'
+import { replaceCatalogFromServer, seedIfEmpty, syncFromServer } from '@/lib/db/seed'
+import type { CatalogSyncProgress } from '@/lib/db/sync-progress'
+import { initialSyncProgress } from '@/lib/db/sync-progress'
 import { cleanProductName, normalizeQuery, skuFromName } from '@/lib/normalize'
-import { computeStock } from '@/lib/stock'
+import { effectiveLowestPrice, maxDiscountPerUnit, DEFAULT_MIN_MARKUP_PERCENT } from '@/lib/pricing'
+import { fetchSettings } from '@/lib/settings'
+import { computeStock, LOW_STOCK_THRESHOLD } from '@/lib/stock'
 import type { Product, ProductCategory, InventoryTransaction } from '@/lib/types'
 
 const emptyForm = {
@@ -22,7 +30,8 @@ const emptyForm = {
 }
 const PAGE_SIZE = 20
 
-export default function ProductsPage() {
+function ProductsPageContent() {
+  const searchParams = useSearchParams()
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<ProductCategory[]>([])
   const [transactions, setTransactions] = useState<InventoryTransaction[]>([])
@@ -34,8 +43,50 @@ export default function ProductsPage() {
   const [dupWarning, setDupWarning] = useState<string[]>([])
   const skuTouched = useRef(false)
   const [filterCategoryId, setFilterCategoryId] = useState<string>('all')
+  const [filterMissingPrices, setFilterMissingPrices] = useState(false)
+  const [stockFilter, setStockFilter] = useState<'all' | 'low' | 'out'>('all')
+  const [restockQtys, setRestockQtys] = useState<Record<string, string>>({})
+  const [restocking, setRestocking] = useState<Record<string, boolean>>({})
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [syncProgress, setSyncProgress] = useState<CatalogSyncProgress | null>(null)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  const [minMarkupPercent, setMinMarkupPercent] = useState(DEFAULT_MIN_MARKUP_PERCENT)
+
+  async function refreshCatalogFromServer() {
+    setRefreshing(true)
+    setSyncProgress(initialSyncProgress())
+    try {
+      const sync = await replaceCatalogFromServer(setSyncProgress)
+      if (!sync.ok) {
+        toast.error('Could not sync from server — check your connection')
+        return
+      }
+      await loadCatalog()
+      await new Promise((r) => setTimeout(r, 600))
+      toast.success(`Catalog refreshed — ${sync.productCount.toLocaleString()} products`)
+    } finally {
+      setRefreshing(false)
+      setSyncProgress(null)
+    }
+  }
+
+  async function loadCatalog() {
+    const [cats, prods, txs] = await Promise.all([getCategories(), getProducts(), getTransactions()])
+    if (prods.length > 0) {
+      setCategories(cats); setProducts(prods); setTransactions(txs)
+    } else {
+      await seedIfEmpty()
+      const [c, p, t] = await Promise.all([getCategories(), getProducts(), getTransactions()])
+      setCategories(c); setProducts(p); setTransactions(t)
+    }
+    const synced = await syncFromServer()
+    if (synced) {
+      const [c, p, t] = await Promise.all([getCategories(), getProducts(), getTransactions()])
+      setCategories(c); setProducts(p); setTransactions(t)
+    }
+  }
 
   function setFilter(id: string) {
     setFilterCategoryId(id)
@@ -48,23 +99,51 @@ export default function ProductsPage() {
   }
 
   useEffect(() => {
-    async function load() {
-      const [cats, prods, txs] = await Promise.all([getCategories(), getProducts(), getTransactions()])
-      if (prods.length > 0) {
-        setCategories(cats); setProducts(prods); setTransactions(txs)
-      } else {
-        await seedIfEmpty()
-        const [c, p, t] = await Promise.all([getCategories(), getProducts(), getTransactions()])
-        setCategories(c); setProducts(p); setTransactions(t)
-      }
-      const synced = await syncFromServer()
-      if (synced) {
-        const [c, p, t] = await Promise.all([getCategories(), getProducts(), getTransactions()])
-        setCategories(c); setProducts(p); setTransactions(t)
-      }
-    }
-    load()
+    loadCatalog()
+    fetchSettings().then((s) => setMinMarkupPercent(s.minMarkupPercent)).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    const stock = searchParams.get('stock')
+    if (stock === 'low' || stock === 'out') {
+      setStockFilter(stock)
+      setPage(1)
+    }
+  }, [searchParams])
+
+  async function handleRestock(product: Product) {
+    const q = parseInt(restockQtys[product.id] ?? '', 10)
+    if (!q || q < 1) {
+      toast.error('Enter a valid quantity')
+      return
+    }
+    setRestocking((r) => ({ ...r, [product.id]: true }))
+    try {
+      const tx: InventoryTransaction = {
+        id: crypto.randomUUID(),
+        type: 'STOCK_IN',
+        productId: product.id,
+        quantity: q,
+        createdAt: new Date().toISOString(),
+      }
+      await createTx(tx)
+      await pushTx(tx)
+      drain().catch(() => {})
+      setTransactions((prev) => [tx, ...prev])
+      setRestockQtys((r) => ({ ...r, [product.id]: '' }))
+      toast.success(`Restocked — ${product.name}`, {
+        description: `+${q} ${product.stockUnit ?? 'units'} added`,
+      })
+    } finally {
+      setRestocking((r) => ({ ...r, [product.id]: false }))
+    }
+  }
+
+  function setStockFilterAndReset(f: 'all' | 'low' | 'out') {
+    setStockFilter(f)
+    setFilterMissingPrices(false)
+    setPage(1)
+  }
 
   async function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -298,16 +377,59 @@ export default function ProductsPage() {
     }
   }
 
-  const categoryMap = Object.fromEntries(categories.map((c) => [c.id, c.name]))
+  const categoryMap = useMemo(
+    () => Object.fromEntries(categories.map((c) => [c.id, c.name])),
+    [categories],
+  )
+
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: products.length }
+    for (const p of products) counts[p.categoryId] = (counts[p.categoryId] ?? 0) + 1
+    return counts
+  }, [products])
+
   const nq = normalizeQuery(search.trim())
-  const visible = products
-    .filter((p) => filterCategoryId === 'all' || p.categoryId === filterCategoryId)
-    .filter((p) =>
-      !nq ||
-      normalizeQuery(p.name).includes(nq) ||
-      normalizeQuery(p.sku).includes(nq) ||
-      normalizeQuery(p.specification ?? '').includes(nq)
-    )
+  const missingPriceCount = products.filter((p) => p.costPrice <= 0 || p.sellingPrice <= 0).length
+  const lowStockCount = useMemo(
+    () => products.filter((p) => {
+      const s = computeStock(p.id, transactions, p.initialStock ?? 0)
+      return s > 0 && s < LOW_STOCK_THRESHOLD
+    }).length,
+    [products, transactions],
+  )
+
+  const visible = useMemo(() => {
+    const rows = products
+      .filter((p) => filterCategoryId === 'all' || p.categoryId === filterCategoryId)
+      .filter((p) => !filterMissingPrices || p.costPrice <= 0 || p.sellingPrice <= 0)
+      .filter(
+        (p) =>
+          !nq ||
+          normalizeQuery(p.name).includes(nq) ||
+          normalizeQuery(p.sku).includes(nq) ||
+          normalizeQuery(p.specification ?? '').includes(nq),
+      )
+      .map((p) => ({
+        product: p,
+        stock: computeStock(p.id, transactions, p.initialStock ?? 0),
+      }))
+      .filter(({ stock }) => {
+        if (stockFilter === 'low') return stock > 0 && stock < LOW_STOCK_THRESHOLD
+        if (stockFilter === 'out') return stock <= 0
+        return true
+      })
+
+    if (stockFilter !== 'all' || filterMissingPrices) {
+      rows.sort((a, b) => {
+        if (a.stock < LOW_STOCK_THRESHOLD && b.stock >= LOW_STOCK_THRESHOLD) return -1
+        if (b.stock < LOW_STOCK_THRESHOLD && a.stock >= LOW_STOCK_THRESHOLD) return 1
+        return a.product.name.localeCompare(b.product.name)
+      })
+    }
+
+    return rows
+  }, [products, filterCategoryId, filterMissingPrices, nq, transactions, stockFilter])
+
   const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE))
   const paginated = visible.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
@@ -319,11 +441,33 @@ export default function ProductsPage() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-6">
-    <div className="max-w-5xl mx-auto">
+    <>
+    <CatalogSyncOverlay open={refreshing} progress={syncProgress} />
+    <div className="flex-1 overflow-y-auto px-4 py-6 min-w-0">
+    <div className="w-full">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Products</h1>
-        <Dialog.Root open={open} onOpenChange={setOpen}>
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Products</h1>
+          <p className="text-sm text-gray-500 mt-0.5">Catalog, pricing, and stock levels</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={refreshCatalogFromServer}
+            disabled={refreshing}
+            title="Replace local catalog with server data"
+            className="inline-flex items-center gap-1.5 border border-gray-300 text-gray-700 px-3.5 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+            {refreshing ? 'Syncing…' : 'Sync catalog'}
+          </button>
+          <button
+            onClick={() => setBulkOpen(true)}
+            className="inline-flex items-center gap-1.5 border border-gray-300 text-gray-700 px-3.5 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+          >
+            <Upload size={16} />
+            Bulk upload
+          </button>
+          <Dialog.Root open={open} onOpenChange={setOpen}>
           <Dialog.Trigger asChild>
             <button onClick={openAdd} className="inline-flex items-center gap-1.5 bg-blue-600 text-white px-3.5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
               <Plus size={16} />
@@ -408,11 +552,14 @@ export default function ProductsPage() {
 
                 <div className="space-y-1.5">
                   <Label.Root htmlFor="p-lowest" className="text-sm font-medium text-gray-700">
-                    Lowest price <span className="text-gray-400 font-normal">(minimum negotiable price — optional)</span>
+                    Lowest price <span className="text-gray-400 font-normal">(optional stricter floor)</span>
                   </Label.Root>
                   <input id="p-lowest" type="number" min="0" step="0.01" value={form.lowestPrice} onChange={field('lowestPrice')}
-                    placeholder="Leave blank to disable discounts"
+                    placeholder="Leave blank to use pricing rule from Settings"
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <p className="text-xs text-gray-400">
+                    Discount floor defaults to cost × markup% (Settings). Set this only to enforce a higher minimum than the rule.
+                  </p>
                 </div>
 
                 {!editingProduct ? (
@@ -490,115 +637,240 @@ export default function ProductsPage() {
             </Dialog.Content>
           </Dialog.Portal>
         </Dialog.Root>
+        </div>
       </div>
 
-      {/* Search */}
-      <div className="relative mb-4">
-        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => handleSearch(e.target.value)}
-          placeholder="Search by name, SKU or specification…"
-          className="w-full border border-gray-200 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 focus:bg-white transition-colors"
-        />
-        {search && (
-          <button onClick={() => handleSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-            <X size={14} />
-          </button>
-        )}
-      </div>
+      <BulkUploadWizard
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        onComplete={() => loadCatalog()}
+      />
 
-      {/* Category filter tabs */}
-      {categories.length > 0 && (
-        <div className="flex gap-1 mb-4 flex-wrap">
+      {lowStockCount > 0 && stockFilter === 'all' && !filterMissingPrices && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-sm text-amber-800 flex items-center gap-2">
+            <AlertTriangle size={16} className="shrink-0" />
+            {lowStockCount} product{lowStockCount === 1 ? '' : 's'} running low — restock inline below.
+          </p>
           <button
-            onClick={() => setFilter('all')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterCategoryId === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            onClick={() => setStockFilterAndReset('low')}
+            className="text-xs font-medium text-amber-900 underline hover:no-underline shrink-0"
           >
-            All
+            Show low stock
           </button>
-          {categories.map((c) => (
-            <button key={c.id} onClick={() => setFilter(c.id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterCategoryId === c.id ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-              {c.name}
-            </button>
-          ))}
         </div>
       )}
 
+      {missingPriceCount > 0 && stockFilter === 'all' && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-sm text-amber-800">
+            {missingPriceCount} product{missingPriceCount === 1 ? '' : 's'} need pricing — update cost or selling price.
+          </p>
+          <button
+            onClick={() => { setFilterMissingPrices(true); setFilter('all'); setStockFilter('all'); setPage(1) }}
+            className="text-xs font-medium text-amber-900 underline hover:no-underline shrink-0"
+          >
+            Show missing
+          </button>
+        </div>
+      )}
+
+      <div className="flex gap-2 items-stretch mb-3">
+        <div className="relative flex-1 min-w-0">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => handleSearch(e.target.value)}
+            placeholder="Search by name, SKU or specification…"
+            className="w-full border border-gray-200 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 focus:bg-white transition-colors"
+          />
+          {search && (
+            <button onClick={() => handleSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+              <X size={14} />
+            </button>
+          )}
+        </div>
+        {categories.length > 0 && (
+          <CategoryPicker
+            categories={categories}
+            counts={categoryCounts}
+            value={filterCategoryId}
+            onChange={(id) => { setFilter(id); setPage(1) }}
+          />
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <div className="flex flex-wrap gap-1">
+          {(['all', 'low', 'out'] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => setStockFilterAndReset(f)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                stockFilter === f
+                  ? f === 'out' ? 'bg-red-600 text-white' : f === 'low' ? 'bg-amber-600 text-white' : 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              {f === 'all' ? 'All stock' : f === 'low' ? `Low stock${lowStockCount > 0 ? ` (${lowStockCount})` : ''}` : 'Out of stock'}
+            </button>
+          ))}
+          {missingPriceCount > 0 && (
+            <button
+              onClick={() => { setFilterMissingPrices(true); setFilter('all'); setStockFilter('all'); setPage(1) }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterMissingPrices ? 'bg-amber-600 text-white' : 'bg-amber-100 text-amber-800 hover:bg-amber-200'}`}
+            >
+              Missing prices ({missingPriceCount})
+            </button>
+          )}
+        </div>
+        <span className="text-xs text-gray-500 ml-auto">
+          {visible.length.toLocaleString()} product{visible.length === 1 ? '' : 's'}
+        </span>
+      </div>
+
       {visible.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 text-gray-500">
-          {search ? (
+          {search || stockFilter !== 'all' || filterMissingPrices || filterCategoryId !== 'all' ? (
             <>
-              <p className="text-sm font-medium">No results for &ldquo;{search}&rdquo;</p>
-              <button onClick={() => handleSearch('')} className="mt-2 text-xs text-blue-600 hover:underline">Clear search</button>
+              <p className="text-sm font-medium">No products match your filters</p>
+              <button
+                onClick={() => {
+                  handleSearch('')
+                  setFilter('all')
+                  setStockFilterAndReset('all')
+                  setFilterMissingPrices(false)
+                }}
+                className="mt-2 text-xs text-blue-600 hover:underline"
+              >
+                Clear filters
+              </button>
             </>
           ) : (
             <p className="text-sm">No products yet — add your first one</p>
           )}
         </div>
       ) : (
-        <div className="border border-gray-200 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="border border-gray-200 rounded-xl">
+          <table className="w-full text-sm table-fixed">
+            <colgroup>
+              <col className="w-11" />
+              <col />
+              <col className="w-[9%]" />
+              <col className="w-[11%]" />
+              <col className="w-[10%]" />
+              <col className="w-[8%]" />
+              <col className="w-[6%]" />
+              <col className="w-[6%]" />
+              <col className="w-[7%]" />
+              <col className="w-[6%]" />
+              <col className="w-[10%]" />
+              <col className="w-9" />
+            </colgroup>
             <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
               <tr>
-                <th className="px-4 py-3 w-12"></th>
-                <th className="text-left px-4 py-3">Name</th>
-                <th className="text-left px-4 py-3">Spec / Size</th>
-                <th className="text-left px-4 py-3">SKU</th>
-                <th className="text-left px-4 py-3">Category</th>
-                <th className="text-right px-4 py-3">In stock</th>
-                <th className="text-right px-4 py-3">Selling price</th>
-                <th className="text-right px-4 py-3">Lowest price</th>
-                <th className="text-right px-4 py-3">Cost price</th>
-                <th className="px-4 py-3 w-10"></th>
+                <th className="px-3 py-3"></th>
+                <th className="text-left px-3 py-3">Name</th>
+                <th className="text-left px-3 py-3">Spec / Size</th>
+                <th className="text-left px-3 py-3">SKU</th>
+                <th className="text-left px-3 py-3">Category</th>
+                <th className="text-right px-3 py-3">In stock</th>
+                <th className="text-right px-3 py-3">Sell</th>
+                <th className="text-right px-3 py-3">Lowest</th>
+                <th className="text-right px-3 py-3">Discount</th>
+                <th className="text-right px-3 py-3">Cost</th>
+                <th className="px-3 py-3 text-right">Add stock</th>
+                <th className="px-2 py-3"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {paginated.map((p) => (
-                <tr key={p.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3">
+              {paginated.map(({ product: p, stock }) => {
+                const isLow = stock < LOW_STOCK_THRESHOLD
+                return (
+                <tr key={p.id} className={`hover:bg-gray-50 ${isLow ? 'bg-amber-50/40' : ''}`}>
+                  <td className="px-3 py-2.5">
                     {p.imageUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.imageUrl} alt={p.name} className="w-10 h-10 rounded-md object-cover" />
+                      <img src={p.imageUrl} alt={p.name} className="w-9 h-9 rounded-md object-cover" />
                     ) : (
-                      <div className="w-10 h-10 rounded-md bg-gray-100 flex items-center justify-center">
+                      <div className="w-9 h-9 rounded-md bg-gray-100 flex items-center justify-center">
                         <Camera size={14} className="text-gray-400" />
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3 font-medium">{p.name}</td>
-                  <td className="px-4 py-3 text-xs text-gray-500">
+                  <td className="px-3 py-2.5 font-medium truncate" title={p.name}>{p.name}</td>
+                  <td className="px-3 py-2.5 text-xs text-gray-500 truncate">
                     {p.specification && <span className="font-medium text-gray-700">{p.specification}</span>}
                     {p.specification && p.stockUnit && <span className="text-gray-400"> · </span>}
                     {p.stockUnit && <span className="text-gray-400">{p.stockUnit}</span>}
                     {!p.specification && !p.stockUnit && <span className="text-gray-300">—</span>}
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-gray-500">{p.sku}</td>
-                  <td className="px-4 py-3 text-gray-500">{categoryMap[p.categoryId] ?? '—'}</td>
-                  <td className="px-4 py-3 text-right">
-                    {(() => {
-                      const s = computeStock(p.id, transactions, p.initialStock ?? 0)
-                      return (
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${s <= 0 ? 'bg-red-100 text-red-700' : s < 5 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
-                          {s <= 0 ? '⚠ Out' : `${s} ${p.stockUnit ?? ''}`}
+                  <td className="px-3 py-2.5 font-mono text-xs text-gray-500 truncate" title={p.sku}>{p.sku}</td>
+                  <td className="px-3 py-2.5 text-gray-500 truncate" title={categoryMap[p.categoryId]}>{categoryMap[p.categoryId] ?? '—'}</td>
+                  <td className="px-3 py-2.5 text-right">
+                    <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${stock <= 0 ? 'bg-red-100 text-red-700' : isLow ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
+                      {stock <= 0 ? 'Out' : stock.toLocaleString()}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{p.sellingPrice.toLocaleString()}</td>
+                  <td className="px-3 py-2.5 text-right text-amber-700 text-xs tabular-nums">
+                    {p.sellingPrice > 0 && p.costPrice > 0 ? (
+                      <>
+                        {effectiveLowestPrice(p, minMarkupPercent).toLocaleString()}
+                        {p.lowestPrice != null && p.lowestPrice > p.costPrice * (minMarkupPercent / 100) && (
+                          <span className="block text-[10px] text-gray-400 font-normal">manual floor</span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2.5 text-right text-xs tabular-nums">
+                    {p.sellingPrice > 0 && p.costPrice > 0 ? (() => {
+                      const maxDisc = maxDiscountPerUnit(p, minMarkupPercent)
+                      const pct = p.sellingPrice > 0 ? Math.round((maxDisc / p.sellingPrice) * 100) : 0
+                      return maxDisc > 0 ? (
+                        <span className="text-emerald-700 font-medium">
+                          {maxDisc.toLocaleString()}
+                          <span className="text-gray-400 font-normal ml-1">({pct}%)</span>
                         </span>
+                      ) : (
+                        <span className="text-gray-300">—</span>
                       )
-                    })()}
+                    })() : (
+                      <span className="text-gray-300">—</span>
+                    )}
                   </td>
-                  <td className="px-4 py-3 text-right">{p.sellingPrice.toLocaleString()}</td>
-                  <td className="px-4 py-3 text-right text-amber-600 text-xs">
-                    {p.lowestPrice != null ? p.lowestPrice.toLocaleString() : <span className="text-gray-300">—</span>}
+                  <td className="px-3 py-2.5 text-right text-gray-500 tabular-nums">{p.costPrice.toLocaleString()}</td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-center gap-1.5 justify-end">
+                      <input
+                        type="number"
+                        min="1"
+                        placeholder="Qty"
+                        value={restockQtys[p.id] ?? ''}
+                        onChange={(e) => setRestockQtys((r) => ({ ...r, [p.id]: e.target.value }))}
+                        onKeyDown={(e) => e.key === 'Enter' && handleRestock(p)}
+                        className="w-12 border border-gray-200 rounded-lg px-1.5 py-1 text-xs text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleRestock(p)}
+                        disabled={restocking[p.id] || !restockQtys[p.id]}
+                        className="px-1.5 py-1 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 disabled:opacity-40 transition-colors whitespace-nowrap"
+                      >
+                        {restocking[p.id] ? '…' : '+'}
+                      </button>
+                    </div>
                   </td>
-                  <td className="px-4 py-3 text-right text-gray-500">{p.costPrice.toLocaleString()}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-2 py-2.5">
                     <button onClick={() => openEdit(p)} className="p-1.5 rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
                       <Pencil size={14} />
                     </button>
                   </td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
         </div>
@@ -649,5 +921,14 @@ export default function ProductsPage() {
       )}
     </div>
     </div>
+    </>
+  )
+}
+
+export default function ProductsPage() {
+  return (
+    <Suspense fallback={<div className="flex-1 p-6 text-sm text-gray-500">Loading products…</div>}>
+      <ProductsPageContent />
+    </Suspense>
   )
 }

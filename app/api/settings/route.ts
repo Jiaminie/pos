@@ -19,7 +19,7 @@ export async function GET() {
 export async function PATCH(req: Request) {
   try {
     const body = await req.json()
-    const { companyName, tagline, logoDataUrl, primaryColor, currency, footerText } = body
+    const { companyName, tagline, logoDataUrl, primaryColor, currency, footerText, minMarkupPercent } = body
 
     const settings = await prisma.storeSettings.upsert({
       where: { id: SINGLETON_ID },
@@ -30,6 +30,7 @@ export async function PATCH(req: Request) {
         ...(primaryColor !== undefined && { primaryColor }),
         ...(currency     !== undefined && { currency }),
         ...(footerText   !== undefined && { footerText }),
+        ...(minMarkupPercent !== undefined && { minMarkupPercent }),
       },
       create: {
         id: SINGLETON_ID,
@@ -39,6 +40,7 @@ export async function PATCH(req: Request) {
         primaryColor: primaryColor ?? '#2563eb',
         currency:     currency     ?? 'KES',
         footerText:   footerText   ?? 'Thank you for your business.',
+        minMarkupPercent: minMarkupPercent ?? 150,
       },
     })
     return Response.json({ data: settings, error: null })

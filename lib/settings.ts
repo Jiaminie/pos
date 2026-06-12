@@ -5,6 +5,8 @@ export interface PDFSettings {
   primaryColor: string     // hex e.g. "#2563eb"
   currency: string
   footerText: string
+  /** Min sell price as % of cost (150 = 1.5× cost). Drives discount floor in POS. */
+  minMarkupPercent: number
 }
 
 export const DEFAULT_SETTINGS: PDFSettings = {
@@ -14,6 +16,7 @@ export const DEFAULT_SETTINGS: PDFSettings = {
   primaryColor: '#2563eb',
   currency: 'KES',
   footerText: 'Thank you for your business.',
+  minMarkupPercent: 150,
 }
 
 const KEY = 'pos-pdf-settings'
@@ -49,6 +52,7 @@ export async function fetchSettings(): Promise<PDFSettings> {
       primaryColor: data.primaryColor ?? DEFAULT_SETTINGS.primaryColor,
       currency:     data.currency     ?? DEFAULT_SETTINGS.currency,
       footerText:   data.footerText   ?? DEFAULT_SETTINGS.footerText,
+      minMarkupPercent: Number(data.minMarkupPercent ?? DEFAULT_SETTINGS.minMarkupPercent),
     }
     cacheSettings(s)
     return s

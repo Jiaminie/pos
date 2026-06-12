@@ -169,7 +169,7 @@ export default function DashboardPage() {
           </div>
           <p className={`text-2xl font-bold ${lowStockCount > 0 ? 'text-amber-600' : ''}`}>{lowStockCount}</p>
           {lowStockCount > 0 && (
-            <Link href="/inventory" className="text-xs text-blue-600 hover:underline mt-1 inline-block">Restock →</Link>
+            <Link href="/products?stock=low" className="text-xs text-blue-600 hover:underline mt-1 inline-block">Restock →</Link>
           )}
         </div>
 
@@ -265,7 +265,7 @@ export default function DashboardPage() {
         {[
           { href: '/pos',       label: 'Go to POS',       color: 'bg-blue-600 hover:bg-blue-700' },
           { href: '/products',  label: 'Manage Products', color: 'bg-gray-700 hover:bg-gray-800' },
-          { href: '/inventory', label: 'Stock In',        color: 'bg-green-600 hover:bg-green-700' },
+          { href: '/products?stock=low', label: 'Restock', color: 'bg-green-600 hover:bg-green-700' },
           { href: '/reports',   label: 'Reports',         color: 'bg-purple-600 hover:bg-purple-700' },
         ].map(({ href, label, color }) => (
           <Link

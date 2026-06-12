@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { CategoryPicker } from '@/components/pos/CategoryPicker'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Select from '@radix-ui/react-select'
-import { AlertCircle, ChevronDown, FileText, ImageOff, Minus, Plus, Search, ShoppingCart, WifiOff, X } from 'lucide-react'
+import { AlertCircle, ChevronDown, Eye, FileText, ImageOff, Minus, Plus, Search, ShoppingCart, Trash2, WifiOff, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { create } from '@/lib/db/transactions'
 import { push, drain } from '@/lib/db/syncQueue'
@@ -16,6 +17,8 @@ import { seedIfEmpty, syncFromServer } from '@/lib/db/seed'
 import { computeStock, getLowStockItems, LOW_STOCK_THRESHOLD } from '@/lib/stock'
 import { getDeviceId } from '@/lib/device'
 import { INCIDENT_REASON_LABELS } from '@/lib/types'
+import { fetchSettings } from '@/lib/settings'
+import { canDiscount, clampUnitPrice, DEFAULT_MIN_MARKUP_PERCENT, discountPerUnit, effectiveLowestPrice } from '@/lib/pricing'
 import type { Product, ProductCategory, InventoryTransaction, IncidentReason } from '@/lib/types'
 
 type CartItem = Product & { qty: number; unitPrice: number }
@@ -39,16 +42,9 @@ export default function POSPage() {
   const [allTransactions, setAllTransactions] = useState<InventoryTransaction[]>([])
   const [activeCategoryId, setActiveCategoryId] = useState<string>('all')
   const [search, setSearch] = useState('')
-  const [cart, setCart] = useState<CartItem[]>(() => {
-    // Restore cart from localStorage on mount so it survives tab navigation
-    if (typeof window === 'undefined') return []
-    try {
-      const saved = localStorage.getItem('pos_cart')
-      return saved ? (JSON.parse(saved) as CartItem[]) : []
-    } catch {
-      return []
-    }
-  })
+  const [productPage, setProductPage] = useState(1)
+  const POS_PAGE_SIZE = 48
+  const [cart, setCart] = useState<CartItem[]>([])
   const [offline, setOffline] = useState(false)
   const [receipt, setReceipt] = useState<{ orderId: string; items: CartItem[]; total: number } | null>(null)
   const [checking, setChecking] = useState(false)
@@ -60,10 +56,25 @@ export default function POSPage() {
   const [incidentSearch, setIncidentSearch] = useState('')
   const [incidentDrafts, setIncidentDrafts] = useState<IncidentDraft[]>([])
   const [incidentSaving, setIncidentSaving] = useState(false)
+  const [minMarkupPercent, setMinMarkupPercent] = useState(DEFAULT_MIN_MARKUP_PERCENT)
+  const [discountEditId, setDiscountEditId] = useState<string | null>(null)
   const alertedIds = useRef<Set<string>>(new Set())
+  const skipCartPersist = useRef(true)
+
+  // Restore cart from localStorage after mount (avoids SSR/client hydration mismatch)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('pos_cart')
+      if (saved) setCart(JSON.parse(saved) as CartItem[])
+    } catch { /* ignore */ }
+  }, [])
 
   // Persist cart across navigation
   useEffect(() => {
+    if (skipCartPersist.current) {
+      skipCartPersist.current = false
+      return
+    }
     try {
       localStorage.setItem('pos_cart', JSON.stringify(cart))
     } catch { /* storage full — ignore */ }
@@ -84,20 +95,22 @@ export default function POSPage() {
   }, [])
 
   useEffect(() => {
+    fetchSettings().then((s) => setMinMarkupPercent(s.minMarkupPercent)).catch(() => {})
+  }, [])
+
+  useEffect(() => {
     async function load() {
       const [cats, prods, txs] = await Promise.all([getCategories(), getProducts(), getTransactions()])
       if (prods.length > 0) {
         setCategories(cats)
         setProducts(prods)
         setAllTransactions(txs)
-        if (cats.length > 0) setActiveCategoryId(cats[0].id)
       } else {
         await seedIfEmpty()
         const [c, p, t] = await Promise.all([getCategories(), getProducts(), getTransactions()])
         setCategories(c)
         setProducts(p)
         setAllTransactions(t)
-        if (c.length > 0) setActiveCategoryId(c[0].id)
       }
       const synced = await syncFromServer()
       if (synced) {
@@ -105,7 +118,6 @@ export default function POSPage() {
         setCategories(c)
         setProducts(p)
         setAllTransactions(t)
-        if (c.length > 0) setActiveCategoryId(c[0].id)
       }
 
       const low = getLowStockItems(prods, txs)
@@ -126,14 +138,46 @@ export default function POSPage() {
   }, [])
 
   const nq = normalizeQuery(search.trim())
-  const visible = products
-    .filter((p) => activeCategoryId === 'all' || p.categoryId === activeCategoryId)
-    .filter((p) =>
-      !nq ||
-      normalizeQuery(p.name).includes(nq) ||
-      normalizeQuery(p.sku).includes(nq) ||
-      normalizeQuery(p.specification ?? '').includes(nq)
-    )
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: products.length }
+    for (const p of products) counts[p.categoryId] = (counts[p.categoryId] ?? 0) + 1
+    return counts
+  }, [products])
+
+  const categoryMap = useMemo(
+    () => Object.fromEntries(categories.map((c) => [c.id, c.name])),
+    [categories],
+  )
+
+  const visible = useMemo(
+    () =>
+      products
+        .filter((p) => activeCategoryId === 'all' || p.categoryId === activeCategoryId)
+        .filter(
+          (p) =>
+            !nq ||
+            normalizeQuery(p.name).includes(nq) ||
+            normalizeQuery(p.sku).includes(nq) ||
+            normalizeQuery(p.specification ?? '').includes(nq),
+        ),
+    [products, activeCategoryId, nq],
+  )
+
+  const productPageCount = Math.max(1, Math.ceil(visible.length / POS_PAGE_SIZE))
+  const paginatedVisible = visible.slice(
+    (productPage - 1) * POS_PAGE_SIZE,
+    productPage * POS_PAGE_SIZE,
+  )
+
+  function setCategory(id: string) {
+    setActiveCategoryId(id)
+    setProductPage(1)
+  }
+
+  function setSearchQuery(q: string) {
+    setSearch(q)
+    setProductPage(1)
+  }
 
   function addToCart(product: Product) {
     setCart((prev) => {
@@ -149,21 +193,43 @@ export default function POSPage() {
     )
   }
 
+  function removeFromCart(id: string) {
+    setCart((prev) => prev.filter((i) => i.id !== id))
+    setDiscountEditId((cur) => (cur === id ? null : cur))
+  }
+
   function setItemPrice(id: string, raw: string) {
     const val = parseFloat(raw)
     if (isNaN(val)) return
     setCart((prev) => prev.map((item) => {
       if (item.id !== id) return item
-      const min = item.lowestPrice ?? item.sellingPrice
-      const max = item.sellingPrice
-      let clamped = val
-      if (val < min) { clamped = min; toast.warning(`Min price for ${item.name} is KES ${min.toLocaleString()}`) }
-      if (val > max) { clamped = max }
+      const min = effectiveLowestPrice(item, minMarkupPercent)
+      const clamped = clampUnitPrice(item, val, minMarkupPercent)
+      if (val < min) {
+        toast.warning(`Min price for ${item.name} is KES ${min.toLocaleString()}`)
+      }
       return { ...item, unitPrice: clamped }
     }))
   }
 
+  function applyDiscountPercent(id: string, percent: number) {
+    setCart((prev) => prev.map((item) => {
+      if (item.id !== id) return item
+      const target = item.sellingPrice * (1 - percent / 100)
+      return { ...item, unitPrice: clampUnitPrice(item, target, minMarkupPercent) }
+    }))
+  }
+
+  function resetItemPrice(id: string) {
+    setCart((prev) => prev.map((item) =>
+      item.id === id ? { ...item, unitPrice: item.sellingPrice } : item
+    ))
+  }
+
   const subtotal = cart.reduce((sum, i) => sum + i.unitPrice * i.qty, 0)
+  const listTotal = cart.reduce((sum, i) => sum + i.sellingPrice * i.qty, 0)
+  const totalDiscount = listTotal - subtotal
+  const discountEditItem = discountEditId ? cart.find((i) => i.id === discountEditId) ?? null : null
 
   async function checkout() {
     setChecking(true)
@@ -344,49 +410,69 @@ export default function POSPage() {
 
       {/* Left: product area */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="px-6 pt-6 pb-3">
+        <div className="px-6 pt-6 pb-3 shrink-0">
           <h1 className="text-2xl font-semibold tracking-tight mb-4">Point of Sale</h1>
 
-          <div className="relative mb-3">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search products…"
-              className="w-full border border-gray-200 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 focus:bg-white transition-colors"
-            />
-            {search && (
-              <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                <X size={14} />
-              </button>
+          <div className="flex gap-2 items-stretch">
+            <div className="relative flex-1 min-w-0">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by name, SKU or size…"
+                className="w-full h-full border border-gray-200 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 focus:bg-white transition-colors"
+              />
+              {search && (
+                <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            {categories.length > 0 && (
+              <CategoryPicker
+                categories={categories}
+                counts={categoryCounts}
+                value={activeCategoryId}
+                onChange={setCategory}
+              />
             )}
           </div>
 
-          {categories.length > 0 && (
-            <div className="flex gap-1 flex-wrap">
-              <button
-                onClick={() => setActiveCategoryId('all')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${activeCategoryId === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-              >
-                All
-              </button>
-              {categories.map((c) => (
-                <button key={c.id} onClick={() => setActiveCategoryId(c.id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${activeCategoryId === c.id ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-                  {c.name}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
+            <span>
+              {visible.length.toLocaleString()} product{visible.length === 1 ? '' : 's'}
+              {activeCategoryId !== 'all' && categoryMap[activeCategoryId]
+                ? ` in ${categoryMap[activeCategoryId]}`
+                : ''}
+              {nq ? ' matching search' : ''}
+            </span>
+            {visible.length > POS_PAGE_SIZE && (
+              <span>
+                Page {productPage} of {productPageCount}
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 pb-6">
           {visible.length === 0 ? (
-            <p className="text-sm text-gray-500 text-center mt-16">No products in this category</p>
+            <div className="text-center mt-16 space-y-2">
+              <p className="text-sm text-gray-500">No products found</p>
+              {(activeCategoryId !== 'all' || nq) && (
+                <button
+                  type="button"
+                  onClick={() => { setCategory('all'); setSearchQuery('') }}
+                  className="text-xs text-blue-600 hover:underline"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
           ) : (
+            <>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 pt-3">
-              {visible.map((p) => {
+              {paginatedVisible.map((p) => {
                 const stock = computeStock(p.id, allTransactions, p.initialStock ?? 0)
                 const isLow = stock < LOW_STOCK_THRESHOLD
                 return (
@@ -411,8 +497,10 @@ export default function POSPage() {
                         <p className="text-xs text-gray-500 mt-0.5">{p.specification}</p>
                       )}
                       <p className="text-blue-600 font-semibold mt-2">KES {p.sellingPrice.toLocaleString()}</p>
-                      {p.lowestPrice != null && (
-                        <p className="text-xs text-amber-600 mt-0.5">Min: KES {p.lowestPrice.toLocaleString()}</p>
+                      {canDiscount(p, minMarkupPercent) && (
+                        <p className="text-xs text-amber-600 mt-0.5">
+                          Min: KES {effectiveLowestPrice(p, minMarkupPercent).toLocaleString()}
+                        </p>
                       )}
                       {isLow && (
                         <p className="text-xs text-amber-600 font-medium mt-1">
@@ -424,6 +512,31 @@ export default function POSPage() {
                 )
               })}
             </div>
+
+            {productPageCount > 1 && (
+              <div className="flex items-center justify-center gap-2 mt-6 pb-2">
+                <button
+                  type="button"
+                  disabled={productPage === 1}
+                  onClick={() => setProductPage((p) => p - 1)}
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+                >
+                  Previous
+                </button>
+                <span className="text-xs text-gray-500 tabular-nums px-2">
+                  {(productPage - 1) * POS_PAGE_SIZE + 1}–{Math.min(productPage * POS_PAGE_SIZE, visible.length)} of {visible.length.toLocaleString()}
+                </span>
+                <button
+                  type="button"
+                  disabled={productPage === productPageCount}
+                  onClick={() => setProductPage((p) => p + 1)}
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            )}
+            </>
           )}
         </div>
       </div>
@@ -445,44 +558,46 @@ export default function POSPage() {
             <p className="text-xs text-gray-500 text-center mt-8">Cart is empty</p>
           ) : (
             cart.map((item) => {
-              const isDiscounted = item.unitPrice < item.sellingPrice
+              const discountable = canDiscount(item, minMarkupPercent)
               return (
-                <div key={item.id} className="space-y-1">
-                  <div className="flex items-center gap-2">
+                <div key={item.id} className="group rounded-lg border border-gray-200 bg-white p-2.5 space-y-2">
+                  <div className="flex items-start gap-1">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{item.name}</p>
-                      <p className="text-xs text-gray-400">
-                        {isDiscounted
-                          ? <><span className="line-through text-gray-300">KES {item.sellingPrice.toLocaleString()}</span>{' '}<span className="text-amber-600">KES {item.unitPrice.toLocaleString()}</span></>
-                          : `KES ${item.sellingPrice.toLocaleString()}`
-                        }
+                      <p className="text-xs text-gray-500 tabular-nums">
+                        KES {item.unitPrice.toLocaleString()}
                       </p>
                     </div>
+                    {discountable && (
+                      <button
+                        type="button"
+                        onClick={() => setDiscountEditId(item.id)}
+                        className="p-1 rounded-md text-gray-400 opacity-0 group-hover:opacity-50 hover:!opacity-100 focus:opacity-100 hover:bg-gray-100 shrink-0 transition-opacity"
+                        title="Adjust price"
+                        aria-label="Adjust price"
+                      >
+                        <Eye size={13} />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeFromCart(item.id)}
+                      className="p-1 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 shrink-0"
+                      title="Remove from cart"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1">
-                      <button onClick={() => setQty(item.id, -1)} className="p-1 rounded-md hover:bg-gray-200"><Minus size={12} /></button>
-                      <span className="text-sm w-5 text-center">{item.qty}</span>
-                      <button onClick={() => setQty(item.id, 1)} className="p-1 rounded-md hover:bg-gray-200"><Plus size={12} /></button>
+                      <button type="button" onClick={() => setQty(item.id, -1)} className="p-1 rounded-md hover:bg-gray-100 border border-gray-200"><Minus size={12} /></button>
+                      <span className="text-sm w-6 text-center tabular-nums">{item.qty}</span>
+                      <button type="button" onClick={() => setQty(item.id, 1)} className="p-1 rounded-md hover:bg-gray-100 border border-gray-200"><Plus size={12} /></button>
                     </div>
-                    <span className="text-sm font-medium w-16 text-right">
-                      {(item.unitPrice * item.qty).toLocaleString()}
+                    <span className="text-sm font-semibold tabular-nums">
+                      KES {(item.unitPrice * item.qty).toLocaleString()}
                     </span>
                   </div>
-                  {/* Price override input (show only if lowest price is set) */}
-                  {item.lowestPrice != null && (
-                    <div className="flex items-center gap-1.5 pl-0">
-                      <span className="text-xs text-gray-400 shrink-0">Price:</span>
-                      <input
-                        type="number"
-                        min={item.lowestPrice}
-                        max={item.sellingPrice}
-                        step="1"
-                        value={item.unitPrice}
-                        onChange={(e) => setItemPrice(item.id, e.target.value)}
-                        className="w-24 border border-gray-200 rounded px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-                      />
-                      <span className="text-xs text-gray-400">(min {item.lowestPrice.toLocaleString()})</span>
-                    </div>
-                  )}
                 </div>
               )
             })
@@ -490,6 +605,18 @@ export default function POSPage() {
         </div>
 
         <div className="px-5 py-4 border-t border-gray-200 space-y-3">
+          {totalDiscount > 0 && (
+            <>
+              <div className="flex justify-between text-xs text-gray-500">
+                <span>List total</span>
+                <span className="line-through">KES {listTotal.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between text-xs text-amber-600">
+                <span>Discount</span>
+                <span>−KES {totalDiscount.toLocaleString()}</span>
+              </div>
+            </>
+          )}
           <div className="flex justify-between text-sm font-semibold">
             <span>Subtotal</span>
             <span>KES {subtotal.toLocaleString()}</span>
@@ -518,6 +645,98 @@ export default function POSPage() {
           </button>
         </div>
       </aside>
+
+      {/* Discount editor (staff-only — opened via hidden eye icon) */}
+      <Dialog.Root open={!!discountEditItem} onOpenChange={(v) => !v && setDiscountEditId(null)}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40" />
+          <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm z-50 focus:outline-none">
+            {discountEditItem && (() => {
+              const item = discountEditItem
+              const floor = effectiveLowestPrice(item, minMarkupPercent)
+              const maxDisc = discountPerUnit(item.sellingPrice, floor)
+              const currentDisc = discountPerUnit(item.sellingPrice, item.unitPrice)
+              const ruleFloor = item.costPrice > 0 ? item.costPrice * (minMarkupPercent / 100) : item.sellingPrice
+              return (
+                <>
+                  <div className="flex items-center justify-between mb-4">
+                    <Dialog.Title className="text-lg font-semibold pr-4">Adjust price</Dialog.Title>
+                    <Dialog.Close asChild>
+                      <button type="button" className="text-gray-500 hover:text-gray-600 p-1 rounded-md"><X size={18} /></button>
+                    </Dialog.Close>
+                  </div>
+                  <p className="text-sm font-medium text-gray-800 mb-1">{item.name}</p>
+                  <p className="text-xs text-gray-500 mb-4">List price: KES {item.sellingPrice.toLocaleString()}</p>
+
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 mb-4 space-y-1.5">
+                    <p className="text-xs font-semibold text-amber-900 flex items-center gap-1.5">
+                      <AlertCircle size={13} className="shrink-0" />
+                      Pricing rules
+                    </p>
+                    <ul className="text-xs text-amber-900/85 space-y-1 list-disc list-inside leading-relaxed">
+                      <li>Minimum sell price: <strong>KES {floor.toLocaleString()}</strong> (cost × {minMarkupPercent}% = {Math.round(ruleFloor).toLocaleString()})</li>
+                      <li>Cannot discount below this floor — price will be clamped automatically</li>
+                      {item.lowestPrice != null && item.lowestPrice > ruleFloor && (
+                        <li>Product has a manual floor of KES {item.lowestPrice.toLocaleString()}</li>
+                      )}
+                      <li>Max discount on this item: <strong>KES {maxDisc.toLocaleString()}</strong></li>
+                    </ul>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-medium text-gray-700">Sell at (per unit)</label>
+                      <input
+                        type="number"
+                        min={floor}
+                        max={item.sellingPrice}
+                        step="1"
+                        value={item.unitPrice}
+                        onChange={(e) => setItemPrice(item.id, e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <p className="text-xs text-gray-400">
+                        Discount: KES {currentDisc.toLocaleString()}
+                        {item.sellingPrice > 0 && ` (${Math.round((currentDisc / item.sellingPrice) * 100)}%)`}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      {[5, 10, 15].map((pct) => (
+                        <button
+                          key={pct}
+                          type="button"
+                          onClick={() => applyDiscountPercent(item.id, pct)}
+                          className="flex-1 text-xs py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-amber-50 hover:border-amber-300 hover:text-amber-800 transition-colors"
+                        >
+                          −{pct}%
+                        </button>
+                      ))}
+                    </div>
+                    {item.unitPrice < item.sellingPrice && (
+                      <button
+                        type="button"
+                        onClick={() => resetItemPrice(item.id)}
+                        className="w-full text-xs text-blue-600 hover:underline py-1"
+                      >
+                        Reset to list price
+                      </button>
+                    )}
+                  </div>
+
+                  <Dialog.Close asChild>
+                    <button
+                      type="button"
+                      className="mt-5 w-full py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors"
+                    >
+                      Done
+                    </button>
+                  </Dialog.Close>
+                </>
+              )
+            })()}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
 
       {/* Receipt modal */}
       <Dialog.Root open={!!receipt} onOpenChange={(v) => !v && setReceipt(null)}>

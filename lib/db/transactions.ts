@@ -10,6 +10,16 @@ export async function getAll(): Promise<InventoryTransaction[]> {
   })
 }
 
+export async function clearAll(): Promise<void> {
+  const db = await openDb()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('transactions', 'readwrite')
+    tx.objectStore('transactions').clear()
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
 export async function create(tx: InventoryTransaction): Promise<void> {
   const db = await openDb()
   await new Promise<void>((resolve, reject) => {

@@ -85,8 +85,9 @@ model StoreSettings {
   logoDataUrl  String  @default("") @map("logo_data_url")
   primaryColor String  @default("#2563eb") @map("primary_color")
   currency     String  @default("KES")
-  footerText   String  @default("Thank you for your business.") @map("footer_text")
-  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+  footerText        String   @default("Thank you for your business.") @map("footer_text")
+  minMarkupPercent  Decimal  @default(150) @map("min_markup_percent")
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("store_settings")
 }
