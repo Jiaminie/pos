@@ -3,6 +3,7 @@
 import { useRef } from 'react'
 import * as Label from '@radix-ui/react-label'
 import { Camera, ImagePlus, X } from 'lucide-react'
+import { compressProductImage } from '@/lib/image'
 
 type Props = {
   imageUrl: string
@@ -15,10 +16,13 @@ export function ProductImageField({ imageUrl, uploading, onFile, onClear }: Prop
   const cameraRef = useRef<HTMLInputElement>(null)
   const galleryRef = useRef<HTMLInputElement>(null)
 
-  function pick(e: React.ChangeEvent<HTMLInputElement>) {
+  async function pick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     e.target.value = ''
-    if (file) onFile(file)
+    if (file) {
+      const compressed = await compressProductImage(file)
+      onFile(compressed)
+    }
   }
 
   const preview = imageUrl ? (
