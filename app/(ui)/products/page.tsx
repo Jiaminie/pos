@@ -9,6 +9,7 @@ import { AlertTriangle, Camera, ChevronDown, ChevronLeft, ChevronRight, Pencil, 
 import { CategoryPicker } from '@/components/pos/CategoryPicker'
 import { BulkUploadWizard } from '@/components/products/BulkUploadWizard'
 import { CatalogSyncOverlay } from '@/components/products/CatalogSyncOverlay'
+import { ProductImageField } from '@/components/products/ProductImageField'
 import { toast } from 'sonner'
 import { getAll as getProducts, upsertMany } from '@/lib/db/products'
 import { getAll as getCategories, upsertMany as upsertCategories } from '@/lib/db/categories'
@@ -145,18 +146,24 @@ function ProductsPageContent() {
     setPage(1)
   }
 
-  async function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+  async function uploadProductImage(file: File) {
     setUploading(true)
-    const body = new FormData()
-    body.append('file', file)
-    const res = await fetch('/api/upload', { method: 'POST', body })
-    if (res.ok) {
-      const { data } = await res.json()
-      setForm((f) => ({ ...f, imageUrl: data?.url ?? '' }))
+    try {
+      const body = new FormData()
+      body.append('file', file)
+      const res = await fetch('/api/upload', { method: 'POST', body })
+      const json = await res.json().catch(() => ({}))
+      if (res.ok && json.data?.url) {
+        setForm((f) => ({ ...f, imageUrl: json.data.url }))
+        toast.success('Photo attached')
+      } else {
+        toast.error(json.error ?? 'Upload failed')
+      }
+    } catch {
+      toast.error('Upload failed — check your connection')
+    } finally {
+      setUploading(false)
     }
-    setUploading(false)
   }
 
   function field(key: keyof typeof emptyForm) {
@@ -443,41 +450,57 @@ function ProductsPageContent() {
   return (
     <>
     <CatalogSyncOverlay open={refreshing} progress={syncProgress} />
-    <div className="flex-1 overflow-y-auto px-4 py-6 min-w-0">
+    <Dialog.Root open={open} onOpenChange={setOpen}>
+    <div className="flex-1 overflow-y-auto px-3 py-4 md:px-4 md:py-6 min-w-0 pb-28 md:pb-6">
     <div className="w-full">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-5 md:mb-6">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Products</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Catalog, pricing, and stock levels</p>
+          <h1 className="text-xl md:text-2xl font-semibold tracking-tight">Products</h1>
+          <p className="text-xs md:text-sm text-gray-500 mt-0.5">Catalog, pricing, and stock levels</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-2 w-full md:w-auto md:flex-row md:items-center">
           <button
-            onClick={refreshCatalogFromServer}
-            disabled={refreshing}
-            title="Replace local catalog with server data"
-            className="inline-flex items-center gap-1.5 border border-gray-300 text-gray-700 px-3.5 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+            type="button"
+            onClick={openAdd}
+            className="md:hidden inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-3 rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors shadow-sm"
           >
-            <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
-            {refreshing ? 'Syncing…' : 'Sync catalog'}
+            <Plus size={18} />
+            Add product
           </button>
-          <button
-            onClick={() => setBulkOpen(true)}
-            className="inline-flex items-center gap-1.5 border border-gray-300 text-gray-700 px-3.5 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
-          >
-            <Upload size={16} />
-            Bulk upload
-          </button>
-          <Dialog.Root open={open} onOpenChange={setOpen}>
-          <Dialog.Trigger asChild>
-            <button onClick={openAdd} className="inline-flex items-center gap-1.5 bg-blue-600 text-white px-3.5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
-              <Plus size={16} />
-              Add product
+          <div className="flex items-center gap-2">
+            <button
+              onClick={refreshCatalogFromServer}
+              disabled={refreshing}
+              title="Sync catalog"
+              className="inline-flex flex-1 md:flex-none items-center justify-center gap-1.5 border border-gray-300 text-gray-700 px-3 py-2.5 md:py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+              <span className="hidden sm:inline">{refreshing ? 'Syncing…' : 'Sync catalog'}</span>
+              <span className="sm:hidden">{refreshing ? '…' : 'Sync'}</span>
             </button>
-          </Dialog.Trigger>
-
+            <button
+              onClick={() => setBulkOpen(true)}
+              className="inline-flex flex-1 md:flex-none items-center justify-center gap-1.5 border border-gray-300 text-gray-700 px-3 py-2.5 md:py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+            >
+              <Upload size={16} />
+              <span className="hidden sm:inline">Bulk upload</span>
+              <span className="sm:hidden">Bulk</span>
+            </button>
+            <Dialog.Trigger asChild>
+              <button
+                onClick={openAdd}
+                className="hidden md:inline-flex items-center gap-1.5 bg-blue-600 text-white px-3.5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+              >
+                <Plus size={16} />
+                Add product
+              </button>
+            </Dialog.Trigger>
+          </div>
+        </div>
+      </div>
           <Dialog.Portal>
             <Dialog.Overlay className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40" />
-            <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-2xl p-6 w-full max-w-md z-50 focus:outline-none max-h-[90vh] overflow-y-auto">
+            <Dialog.Content className="fixed z-50 bg-white shadow-2xl focus:outline-none overflow-y-auto max-h-[92vh] sm:max-h-[90vh] inset-x-0 bottom-0 rounded-t-2xl p-5 pb-8 w-full sm:inset-auto sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl sm:p-6 sm:w-full sm:max-w-md">
               <div className="flex items-center justify-between mb-5">
                 <Dialog.Title className="text-lg font-semibold">{editingProduct ? 'Edit product' : 'Add product'}</Dialog.Title>
                 <Dialog.Close asChild>
@@ -485,30 +508,11 @@ function ProductsPageContent() {
                 </Dialog.Close>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Image upload */}
-                <div className="space-y-1.5">
-                  <Label.Root className="text-sm font-medium text-gray-700">Image</Label.Root>
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <div className="w-20 h-20 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden bg-gray-50 shrink-0">
-                      {form.imageUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={form.imageUrl} alt="preview" className="w-full h-full object-cover" />
-                      ) : (
-                        <Camera size={20} className="text-gray-400" />
-                      )}
-                    </div>
-                    <span className="text-sm text-gray-600">
-                      {uploading ? 'Uploading…' : 'Click to upload an image'}
-                    </span>
-                    <input type="file" accept="image/*" className="sr-only" onChange={handleImageChange} disabled={uploading} />
-                  </label>
-                </div>
-
-                <div className="space-y-1.5">
+              <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+                <div className="space-y-1.5 order-1 sm:order-2">
                   <Label.Root htmlFor="p-name" className="text-sm font-medium text-gray-700">Name</Label.Root>
                   <input id="p-name" required value={form.name} onChange={handleNameChange} onBlur={handleNameBlur}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 sm:py-2 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   {dupWarning.length > 0 && (
                     <p className="text-xs text-amber-600">
                       Similar product already exists: {dupWarning.join(', ')}
@@ -516,13 +520,22 @@ function ProductsPageContent() {
                   )}
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="order-2 sm:order-1">
+                  <ProductImageField
+                    imageUrl={form.imageUrl}
+                    uploading={uploading}
+                    onFile={uploadProductImage}
+                    onClear={() => setForm((f) => ({ ...f, imageUrl: '' }))}
+                  />
+                </div>
+
+                <div className="space-y-1.5 order-3">
                   <Label.Root htmlFor="p-sku" className="text-sm font-medium text-gray-700">SKU</Label.Root>
                   <input id="p-sku" required value={form.sku} onChange={handleSkuChange}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-3 order-3">
                   <div className="space-y-1.5">
                     <Label.Root htmlFor="p-spec" className="text-sm font-medium text-gray-700">Specification / Size <span className="text-gray-400 font-normal">(optional)</span></Label.Root>
                     <input id="p-spec" value={form.specification} onChange={handleSpecChange}
@@ -537,7 +550,7 @@ function ProductsPageContent() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-3 order-3">
                   <div className="space-y-1.5">
                     <Label.Root htmlFor="p-sell" className="text-sm font-medium text-gray-700">Selling price</Label.Root>
                     <input id="p-sell" required type="number" min="0" step="0.01" value={form.sellingPrice} onChange={field('sellingPrice')}
@@ -550,7 +563,7 @@ function ProductsPageContent() {
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-1.5 order-3">
                   <Label.Root htmlFor="p-lowest" className="text-sm font-medium text-gray-700">
                     Lowest price <span className="text-gray-400 font-normal">(optional stricter floor)</span>
                   </Label.Root>
@@ -563,7 +576,7 @@ function ProductsPageContent() {
                 </div>
 
                 {!editingProduct ? (
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.5 order-3">
                     <Label.Root htmlFor="p-stock" className="text-sm font-medium text-gray-700">
                       Opening stock <span className="text-gray-400 font-normal">(units you have right now)</span>
                     </Label.Root>
@@ -572,7 +585,7 @@ function ProductsPageContent() {
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                 ) : (
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.5 order-3">
                     {(() => {
                       const currentStock = computeStock(editingProduct.id, transactions, editingProduct.initialStock ?? 0)
                       return (
@@ -592,7 +605,7 @@ function ProductsPageContent() {
                   </div>
                 )}
 
-                <div className="space-y-1.5">
+                <div className="space-y-1.5 order-3">
                   <Label.Root className="text-sm font-medium text-gray-700">Category</Label.Root>
                   {categories.length > 0 ? (
                     <Select.Root value={form.categoryId} onValueChange={(v) => setForm((f) => ({ ...f, categoryId: v, newCategory: '' }))}>
@@ -624,21 +637,18 @@ function ProductsPageContent() {
                   )}
                 </div>
 
-                <div className="flex gap-2 pt-1 justify-end">
+                <div className="flex gap-2 pt-1 justify-end order-3 sm:sticky sm:bottom-0 sm:bg-white sm:pt-2">
                   <Dialog.Close asChild>
-                    <button type="button" className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
+                    <button type="button" className="flex-1 sm:flex-none px-4 py-2.5 sm:py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
                   </Dialog.Close>
                   <button type="submit" disabled={saving}
-                    className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                    className="flex-1 sm:flex-none px-4 py-2.5 sm:py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
                     {saving ? 'Saving…' : editingProduct ? 'Update' : 'Save'}
                   </button>
                 </div>
               </form>
             </Dialog.Content>
           </Dialog.Portal>
-        </Dialog.Root>
-        </div>
-      </div>
 
       <BulkUploadWizard
         open={bulkOpen}
@@ -646,7 +656,7 @@ function ProductsPageContent() {
         onComplete={() => loadCatalog()}
       />
 
-      {lowStockCount > 0 && stockFilter === 'all' && !filterMissingPrices && (
+      {lowStockCount > 0 && stockFilter === 'all' && (
         <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
           <p className="text-sm text-amber-800 flex items-center gap-2">
             <AlertTriangle size={16} className="shrink-0" />
@@ -753,126 +763,183 @@ function ProductsPageContent() {
         </div>
       ) : (
         <div className="border border-gray-200 rounded-xl">
-          <table className="w-full text-sm table-fixed">
-            <colgroup>
-              <col className="w-11" />
-              <col />
-              <col className="w-[9%]" />
-              <col className="w-[11%]" />
-              <col className="w-[10%]" />
-              <col className="w-[8%]" />
-              <col className="w-[6%]" />
-              <col className="w-[6%]" />
-              <col className="w-[7%]" />
-              <col className="w-[6%]" />
-              <col className="w-[10%]" />
-              <col className="w-9" />
-            </colgroup>
-            <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
-              <tr>
-                <th className="px-3 py-3"></th>
-                <th className="text-left px-3 py-3">Name</th>
-                <th className="text-left px-3 py-3">Spec / Size</th>
-                <th className="text-left px-3 py-3">SKU</th>
-                <th className="text-left px-3 py-3">Category</th>
-                <th className="text-right px-3 py-3">In stock</th>
-                <th className="text-right px-3 py-3">Sell</th>
-                <th className="text-right px-3 py-3">Lowest</th>
-                <th className="text-right px-3 py-3">Discount</th>
-                <th className="text-right px-3 py-3">Cost</th>
-                <th className="px-3 py-3 text-right">Add stock</th>
-                <th className="px-2 py-3"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {paginated.map(({ product: p, stock }) => {
-                const isLow = stock < LOW_STOCK_THRESHOLD
-                return (
-                <tr key={p.id} className={`hover:bg-gray-50 ${isLow ? 'bg-amber-50/40' : ''}`}>
-                  <td className="px-3 py-2.5">
-                    {p.imageUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.imageUrl} alt={p.name} className="w-9 h-9 rounded-md object-cover" />
-                    ) : (
-                      <div className="w-9 h-9 rounded-md bg-gray-100 flex items-center justify-center">
-                        <Camera size={14} className="text-gray-400" />
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5 font-medium truncate" title={p.name}>{p.name}</td>
-                  <td className="px-3 py-2.5 text-xs text-gray-500 truncate">
-                    {p.specification && <span className="font-medium text-gray-700">{p.specification}</span>}
-                    {p.specification && p.stockUnit && <span className="text-gray-400"> · </span>}
-                    {p.stockUnit && <span className="text-gray-400">{p.stockUnit}</span>}
-                    {!p.specification && !p.stockUnit && <span className="text-gray-300">—</span>}
-                  </td>
-                  <td className="px-3 py-2.5 font-mono text-xs text-gray-500 truncate" title={p.sku}>{p.sku}</td>
-                  <td className="px-3 py-2.5 text-gray-500 truncate" title={categoryMap[p.categoryId]}>{categoryMap[p.categoryId] ?? '—'}</td>
-                  <td className="px-3 py-2.5 text-right">
-                    <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${stock <= 0 ? 'bg-red-100 text-red-700' : isLow ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
-                      {stock <= 0 ? 'Out' : stock.toLocaleString()}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{p.sellingPrice.toLocaleString()}</td>
-                  <td className="px-3 py-2.5 text-right text-amber-700 text-xs tabular-nums">
-                    {p.sellingPrice > 0 && p.costPrice > 0 ? (
-                      <>
-                        {effectiveLowestPrice(p, minMarkupPercent).toLocaleString()}
-                        {p.lowestPrice != null && p.lowestPrice > p.costPrice * (minMarkupPercent / 100) && (
-                          <span className="block text-[10px] text-gray-400 font-normal">manual floor</span>
-                        )}
-                      </>
-                    ) : (
-                      <span className="text-gray-300">—</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5 text-right text-xs tabular-nums">
-                    {p.sellingPrice > 0 && p.costPrice > 0 ? (() => {
-                      const maxDisc = maxDiscountPerUnit(p, minMarkupPercent)
-                      const pct = p.sellingPrice > 0 ? Math.round((maxDisc / p.sellingPrice) * 100) : 0
-                      return maxDisc > 0 ? (
-                        <span className="text-emerald-700 font-medium">
-                          {maxDisc.toLocaleString()}
-                          <span className="text-gray-400 font-normal ml-1">({pct}%)</span>
-                        </span>
+          {/* Desktop Table View */}
+          <div className="hidden md:block">
+            <table className="w-full text-sm table-fixed">
+              <colgroup>
+                <col className="w-11" />
+                <col />
+                <col className="w-[9%]" />
+                <col className="w-[11%]" />
+                <col className="w-[10%]" />
+                <col className="w-[8%]" />
+                <col className="w-[6%]" />
+                <col className="w-[6%]" />
+                <col className="w-[7%]" />
+                <col className="w-[6%]" />
+                <col className="w-[10%]" />
+                <col className="w-9" />
+              </colgroup>
+              <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+                <tr>
+                  <th className="px-3 py-3"></th>
+                  <th className="text-left px-3 py-3">Name</th>
+                  <th className="text-left px-3 py-3">Spec / Size</th>
+                  <th className="text-left px-3 py-3">SKU</th>
+                  <th className="text-left px-3 py-3">Category</th>
+                  <th className="text-right px-3 py-3">In stock</th>
+                  <th className="text-right px-3 py-3">Sell</th>
+                  <th className="text-right px-3 py-3">Lowest</th>
+                  <th className="text-right px-3 py-3">Discount</th>
+                  <th className="text-right px-3 py-3">Cost</th>
+                  <th className="px-3 py-3 text-right">Add stock</th>
+                  <th className="px-2 py-3"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {paginated.map(({ product: p, stock }) => {
+                  const isLow = stock < LOW_STOCK_THRESHOLD
+                  return (
+                  <tr key={p.id} className={`hover:bg-gray-50 ${isLow ? 'bg-amber-50/40' : ''}`}>
+                    <td className="px-3 py-2.5">
+                      {p.imageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={p.imageUrl} alt={p.name} className="w-9 h-9 rounded-md object-cover" />
+                      ) : (
+                        <div className="w-9 h-9 rounded-md bg-gray-100 flex items-center justify-center">
+                          <Camera size={14} className="text-gray-400" />
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 font-medium truncate" title={p.name}>{p.name}</td>
+                    <td className="px-3 py-2.5 text-xs text-gray-500 truncate">
+                      {p.specification && <span className="font-medium text-gray-700">{p.specification}</span>}
+                      {p.specification && p.stockUnit && <span className="text-gray-400"> · </span>}
+                      {p.stockUnit && <span className="text-gray-400">{p.stockUnit}</span>}
+                      {!p.specification && !p.stockUnit && <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="px-3 py-2.5 font-mono text-xs text-gray-500 truncate" title={p.sku}>{p.sku}</td>
+                    <td className="px-3 py-2.5 text-gray-500 truncate" title={categoryMap[p.categoryId]}>{categoryMap[p.categoryId] ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-right">
+                      <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${stock <= 0 ? 'bg-red-100 text-red-700' : isLow ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
+                        {stock <= 0 ? 'Out' : stock.toLocaleString()}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">{p.sellingPrice.toLocaleString()}</td>
+                    <td className="px-3 py-2.5 text-right text-amber-700 text-xs tabular-nums">
+                      {p.sellingPrice > 0 && p.costPrice > 0 ? (
+                        <>
+                          {effectiveLowestPrice(p, minMarkupPercent).toLocaleString()}
+                          {p.lowestPrice != null && p.lowestPrice > p.costPrice * (minMarkupPercent / 100) && (
+                            <span className="block text-[10px] text-gray-400 font-normal">manual floor</span>
+                          )}
+                        </>
                       ) : (
                         <span className="text-gray-300">—</span>
-                      )
-                    })() : (
-                      <span className="text-gray-300">—</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5 text-right text-gray-500 tabular-nums">{p.costPrice.toLocaleString()}</td>
-                  <td className="px-3 py-2.5">
-                    <div className="flex items-center gap-1.5 justify-end">
-                      <input
-                        type="number"
-                        min="1"
-                        placeholder="Qty"
-                        value={restockQtys[p.id] ?? ''}
-                        onChange={(e) => setRestockQtys((r) => ({ ...r, [p.id]: e.target.value }))}
-                        onKeyDown={(e) => e.key === 'Enter' && handleRestock(p)}
-                        className="w-12 border border-gray-200 rounded-lg px-1.5 py-1 text-xs text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleRestock(p)}
-                        disabled={restocking[p.id] || !restockQtys[p.id]}
-                        className="px-1.5 py-1 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 disabled:opacity-40 transition-colors whitespace-nowrap"
-                      >
-                        {restocking[p.id] ? '…' : '+'}
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-xs tabular-nums">
+                      {p.sellingPrice > 0 && p.costPrice > 0 ? (() => {
+                        const maxDisc = maxDiscountPerUnit(p, minMarkupPercent)
+                        const pct = p.sellingPrice > 0 ? Math.round((maxDisc / p.sellingPrice) * 100) : 0
+                        return maxDisc > 0 ? (
+                          <span className="text-emerald-700 font-medium">
+                            {maxDisc.toLocaleString()}
+                            <span className="text-gray-400 font-normal ml-1">({pct}%)</span>
+                          </span>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )
+                      })() : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-gray-500 tabular-nums">{p.costPrice.toLocaleString()}</td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-1.5 justify-end">
+                        <input
+                          type="number"
+                          min="1"
+                          placeholder="Qty"
+                          value={restockQtys[p.id] ?? ''}
+                          onChange={(e) => setRestockQtys((r) => ({ ...r, [p.id]: e.target.value }))}
+                          onKeyDown={(e) => e.key === 'Enter' && handleRestock(p)}
+                          className="w-12 border border-gray-200 rounded-lg px-1.5 py-1 text-xs text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleRestock(p)}
+                          disabled={restocking[p.id] || !restockQtys[p.id]}
+                          className="px-1.5 py-1 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 disabled:opacity-40 transition-colors whitespace-nowrap"
+                        >
+                          {restocking[p.id] ? '…' : '+'}
+                        </button>
+                      </div>
+                    </td>
+                    <td className="px-2 py-2.5">
+                      <button onClick={() => openEdit(p)} className="p-1.5 rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
+                        <Pencil size={14} />
                       </button>
+                    </td>
+                  </tr>
+                )})}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden divide-y divide-gray-100">
+            {paginated.map(({ product: p, stock }) => {
+              const isLow = stock < LOW_STOCK_THRESHOLD
+              return (
+                <div key={p.id} className={`p-4 ${isLow ? 'bg-amber-50/40' : ''}`}>
+                  <div className="flex items-start gap-3">
+                    {p.imageUrl ? (
+                      <img src={p.imageUrl} alt={p.name} className="w-12 h-12 rounded-lg object-cover" />
+                    ) : (
+                      <div className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">
+                        <Camera size={20} className="text-gray-400" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="font-semibold text-gray-900 truncate">{p.name}</h3>
+                        <button onClick={() => openEdit(p)} className="p-1 -mr-1 text-gray-400 hover:text-blue-600">
+                          <Pencil size={16} />
+                        </button>
+                      </div>
+                      <p className="text-xs text-gray-500 font-mono">{p.sku}</p>
+                      <div className="mt-2 flex items-center justify-between text-xs">
+                        <span className={`font-semibold px-2 py-0.5 rounded-full ${stock <= 0 ? 'bg-red-100 text-red-700' : isLow ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
+                          {stock <= 0 ? 'Out of stock' : `${stock.toLocaleString()} ${p.stockUnit ?? 'units'}`}
+                        </span>
+                        <span className="font-medium text-gray-900">{p.sellingPrice.toLocaleString()}</span>
+                      </div>
                     </div>
-                  </td>
-                  <td className="px-2 py-2.5">
-                    <button onClick={() => openEdit(p)} className="p-1.5 rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
-                      <Pencil size={14} />
+                  </div>
+                  <div className="mt-4 flex items-center justify-end gap-2">
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="Add Qty"
+                      value={restockQtys[p.id] ?? ''}
+                      onChange={(e) => setRestockQtys((r) => ({ ...r, [p.id]: e.target.value }))}
+                      onKeyDown={(e) => e.key === 'Enter' && handleRestock(p)}
+                      className="w-20 border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleRestock(p)}
+                      disabled={restocking[p.id] || !restockQtys[p.id]}
+                      className="px-4 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 disabled:opacity-40 transition-colors"
+                    >
+                      {restocking[p.id] ? 'Adding…' : 'Add Stock'}
                     </button>
-                  </td>
-                </tr>
-              )})}
-            </tbody>
-          </table>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
 
@@ -921,6 +988,7 @@ function ProductsPageContent() {
       )}
     </div>
     </div>
+    </Dialog.Root>
     </>
   )
 }

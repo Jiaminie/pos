@@ -400,7 +400,7 @@ export default function POSPage() {
   const reasonOptions = Object.entries(INCIDENT_REASON_LABELS) as [IncidentReason, string][]
 
   return (
-    <div className="flex flex-1 overflow-hidden">
+    <div className="flex flex-col md:flex-row flex-1 h-screen overflow-hidden">
       {offline && (
         <div className="fixed top-3 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-amber-50 border border-amber-300 text-amber-800 text-xs px-3 py-1.5 rounded-full shadow">
           <WifiOff size={13} />
@@ -410,8 +410,8 @@ export default function POSPage() {
 
       {/* Left: product area */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="px-6 pt-6 pb-3 shrink-0">
-          <h1 className="text-2xl font-semibold tracking-tight mb-4">Point of Sale</h1>
+        <div className="px-4 md:px-6 pt-4 md:pt-6 pb-2 shrink-0">
+          <h1 className="text-xl md:text-2xl font-semibold tracking-tight mb-2 md:mb-4">Point of Sale</h1>
 
           <div className="flex gap-2 items-stretch">
             <div className="relative flex-1 min-w-0">
@@ -542,7 +542,7 @@ export default function POSPage() {
       </div>
 
       {/* Right: cart */}
-      <aside className="w-80 border-l border-gray-200 flex flex-col bg-gray-50">
+      <aside className="w-full md:w-80 border-t md:border-t-0 md:border-l border-gray-200 flex flex-col bg-gray-50 flex-[0_0_auto] max-h-[50vh] md:max-h-full">
         <div className="flex items-center gap-2 px-5 py-4 border-b border-gray-200">
           <ShoppingCart size={18} className="text-gray-500" />
           <span className="font-semibold text-sm">Cart</span>
