@@ -92,6 +92,7 @@ async function fetchCatalogFromServer(
         categoryId: p.category ? slugify(p.category) : 'uncategorised',
         imageUrl: p.imageUrl ?? undefined,
         initialStock: parseInitialStock(p.quantity),
+        createdAt: p.createdAt ? new Date(p.createdAt).toISOString() : undefined,
       })
       recentNames.push(p.name)
     }

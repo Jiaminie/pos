@@ -18,6 +18,7 @@ import { push as pushTx, drain } from '@/lib/db/syncQueue'
 import { replaceCatalogFromServer, seedIfEmpty, syncFromServer } from '@/lib/db/seed'
 import type { CatalogSyncProgress } from '@/lib/db/sync-progress'
 import { initialSyncProgress } from '@/lib/db/sync-progress'
+import { ADDED_RANGES, isInAddedRange, type AddedRange } from '@/lib/dates'
 import { cleanProductName, normalizeQuery, skuFromName, uniqueSku } from '@/lib/normalize'
 import { effectiveLowestPrice, maxDiscountPerUnit, DEFAULT_MIN_MARKUP_PERCENT } from '@/lib/pricing'
 import { fetchSettings } from '@/lib/settings'
@@ -46,6 +47,7 @@ function ProductsPageContent() {
   const [filterCategoryId, setFilterCategoryId] = useState<string>('all')
   const [filterMissingPrices, setFilterMissingPrices] = useState(false)
   const [stockFilter, setStockFilter] = useState<'all' | 'low' | 'out'>('all')
+  const [addedFilter, setAddedFilter] = useState<AddedRange>('all')
   const [restockQtys, setRestockQtys] = useState<Record<string, string>>({})
   const [restocking, setRestocking] = useState<Record<string, boolean>>({})
   const [bulkOpen, setBulkOpen] = useState(false)
@@ -143,6 +145,11 @@ function ProductsPageContent() {
   function setStockFilterAndReset(f: 'all' | 'low' | 'out') {
     setStockFilter(f)
     setFilterMissingPrices(false)
+    setPage(1)
+  }
+
+  function setAddedFilterAndReset(f: AddedRange) {
+    setAddedFilter(f)
     setPage(1)
   }
 
@@ -333,6 +340,7 @@ function ProductsPageContent() {
           costPrice,
           lowestPrice,
           categoryId,
+          createdAt: new Date().toISOString(),
           ...(form.imageUrl ? { imageUrl: form.imageUrl } : {}),
         }
         await upsertMany([product])
@@ -410,6 +418,7 @@ function ProductsPageContent() {
     const rows = products
       .filter((p) => filterCategoryId === 'all' || p.categoryId === filterCategoryId)
       .filter((p) => !filterMissingPrices || p.costPrice <= 0 || p.sellingPrice <= 0)
+      .filter((p) => isInAddedRange(p.createdAt, addedFilter))
       .filter(
         (p) =>
           !nq ||
@@ -427,7 +436,13 @@ function ProductsPageContent() {
         return true
       })
 
-    if (stockFilter !== 'all' || filterMissingPrices) {
+    if (addedFilter !== 'all') {
+      rows.sort((a, b) => {
+        const ta = a.product.createdAt ? new Date(a.product.createdAt).getTime() : 0
+        const tb = b.product.createdAt ? new Date(b.product.createdAt).getTime() : 0
+        return tb - ta
+      })
+    } else if (stockFilter !== 'all' || filterMissingPrices) {
       rows.sort((a, b) => {
         if (a.stock < LOW_STOCK_THRESHOLD && b.stock >= LOW_STOCK_THRESHOLD) return -1
         if (b.stock < LOW_STOCK_THRESHOLD && a.stock >= LOW_STOCK_THRESHOLD) return 1
@@ -436,7 +451,7 @@ function ProductsPageContent() {
     }
 
     return rows
-  }, [products, filterCategoryId, filterMissingPrices, nq, transactions, stockFilter])
+  }, [products, filterCategoryId, filterMissingPrices, addedFilter, nq, transactions, stockFilter])
 
   const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE))
   const paginated = visible.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
@@ -684,7 +699,7 @@ function ProductsPageContent() {
             {missingPriceCount} product{missingPriceCount === 1 ? '' : 's'} need pricing — update cost or selling price.
           </p>
           <button
-            onClick={() => { setFilterMissingPrices(true); setFilter('all'); setStockFilter('all'); setPage(1) }}
+            onClick={() => { setFilterMissingPrices(true); setFilter('all'); setStockFilter('all'); setAddedFilter('all'); setPage(1) }}
             className="text-xs font-medium text-amber-900 underline hover:no-underline shrink-0"
           >
             Show missing
@@ -735,12 +750,28 @@ function ProductsPageContent() {
           ))}
           {missingPriceCount > 0 && (
             <button
-              onClick={() => { setFilterMissingPrices(true); setFilter('all'); setStockFilter('all'); setPage(1) }}
+              onClick={() => { setFilterMissingPrices(true); setFilter('all'); setStockFilter('all'); setAddedFilter('all'); setPage(1) }}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterMissingPrices ? 'bg-amber-600 text-white' : 'bg-amber-100 text-amber-800 hover:bg-amber-200'}`}
             >
               Missing prices ({missingPriceCount})
             </button>
           )}
+        </div>
+        <div className="hidden sm:block w-px h-5 bg-gray-200" />
+        <div className="flex flex-wrap gap-1">
+          {ADDED_RANGES.map((r) => (
+            <button
+              key={r.value}
+              onClick={() => setAddedFilterAndReset(r.value)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                addedFilter === r.value
+                  ? 'bg-violet-600 text-white'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              {r.label}
+            </button>
+          ))}
         </div>
         <span className="text-xs text-gray-500 ml-auto">
           {visible.length.toLocaleString()} product{visible.length === 1 ? '' : 's'}
@@ -749,7 +780,7 @@ function ProductsPageContent() {
 
       {visible.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 text-gray-500">
-          {search || stockFilter !== 'all' || filterMissingPrices || filterCategoryId !== 'all' ? (
+          {search || stockFilter !== 'all' || addedFilter !== 'all' || filterMissingPrices || filterCategoryId !== 'all' ? (
             <>
               <p className="text-sm font-medium">No products match your filters</p>
               <button
@@ -757,6 +788,7 @@ function ProductsPageContent() {
                   handleSearch('')
                   setFilter('all')
                   setStockFilterAndReset('all')
+                  setAddedFilterAndReset('all')
                   setFilterMissingPrices(false)
                 }}
                 className="mt-2 text-xs text-blue-600 hover:underline"

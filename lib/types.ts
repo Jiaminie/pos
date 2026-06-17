@@ -15,6 +15,7 @@ export type Product = {
   categoryId: string
   imageUrl?: string
   initialStock?: number
+  createdAt?: string
   category?: ProductCategory
 }
 
