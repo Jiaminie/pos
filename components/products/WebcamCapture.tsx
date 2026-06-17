@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { Camera, X } from 'lucide-react'
+import { Camera, RefreshCw, X } from 'lucide-react'
+import { isRearCameraLabel, openCameraStream, openPreferredRearCamera } from '@/lib/camera'
 
 type Props = {
   open: boolean
@@ -13,13 +14,37 @@ type Props = {
 export function WebcamCapture({ open, onOpenChange, onCapture }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const camerasRef = useRef<MediaDeviceInfo[]>([])
+  const activeDeviceIdRef = useRef<string | undefined>()
   const [error, setError] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
+  const [cameraCount, setCameraCount] = useState(0)
+  const [usingRear, setUsingRear] = useState(true)
 
   const stopStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
   }, [])
+
+  const attachStream = useCallback(
+    async (stream: MediaStream) => {
+      stopStream()
+      streamRef.current = stream
+      const track = stream.getVideoTracks()[0]
+      const deviceId = track?.getSettings().deviceId
+      activeDeviceIdRef.current = deviceId
+      const camera = camerasRef.current.find((c) => c.deviceId === deviceId)
+      const label = camera?.label ?? track?.label ?? ''
+      setUsingRear(isRearCameraLabel(label))
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        await videoRef.current.play()
+        setReady(true)
+      }
+    },
+    [stopStream],
+  )
 
   const handleOpenChange = useCallback(
     (next: boolean) => {
@@ -27,6 +52,10 @@ export function WebcamCapture({ open, onOpenChange, onCapture }: Props) {
         stopStream()
         setError(null)
         setReady(false)
+        setCameraCount(0)
+        setUsingRear(true)
+        camerasRef.current = []
+        activeDeviceIdRef.current = undefined
       }
       onOpenChange(next)
     },
@@ -45,36 +74,17 @@ export function WebcamCapture({ open, onOpenChange, onCapture }: Props) {
       }
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 960 } },
-          audio: false,
-        })
+        const { stream, cameras, activeDeviceId } = await openPreferredRearCamera()
         if (cancelled) {
           stream.getTracks().forEach((track) => track.stop())
           return
         }
-        streamRef.current = stream
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-          await videoRef.current.play()
-          setReady(true)
-        }
+        camerasRef.current = cameras
+        setCameraCount(cameras.length)
+        activeDeviceIdRef.current = activeDeviceId
+        await attachStream(stream)
       } catch {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-          if (cancelled) {
-            stream.getTracks().forEach((track) => track.stop())
-            return
-          }
-          streamRef.current = stream
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream
-            await videoRef.current.play()
-            setReady(true)
-          }
-        } catch {
-          setError('Could not access the camera. Check permissions and try again.')
-        }
+        setError('Could not access the camera. Check permissions and try again.')
       }
     }
 
@@ -83,7 +93,25 @@ export function WebcamCapture({ open, onOpenChange, onCapture }: Props) {
       cancelled = true
       stopStream()
     }
-  }, [open, stopStream])
+  }, [attachStream, open, stopStream])
+
+  async function switchCamera() {
+    const cameras = camerasRef.current
+    if (cameras.length < 2) return
+
+    setReady(false)
+    stopStream()
+
+    const currentId = activeDeviceIdRef.current
+    const next = cameras.find((c) => c.deviceId !== currentId) ?? cameras[0]
+    try {
+      const stream = await openCameraStream(next.deviceId)
+      await attachStream(stream)
+      setUsingRear(isRearCameraLabel(next.label))
+    } catch {
+      setError('Could not switch camera.')
+    }
+  }
 
   function capture() {
     const video = videoRef.current
@@ -142,6 +170,10 @@ export function WebcamCapture({ open, onOpenChange, onCapture }: Props) {
             )}
           </div>
 
+          <p className="mt-2 text-xs text-gray-500 text-center">
+            {usingRear ? 'Using rear camera — point the back of the device at the product.' : 'Using front camera.'}
+          </p>
+
           <div className="mt-4 flex gap-2">
             <Dialog.Close asChild>
               <button
@@ -151,6 +183,18 @@ export function WebcamCapture({ open, onOpenChange, onCapture }: Props) {
                 Cancel
               </button>
             </Dialog.Close>
+            {cameraCount > 1 && (
+              <button
+                type="button"
+                disabled={!ready}
+                onClick={switchCamera}
+                className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                title="Switch camera"
+              >
+                <RefreshCw size={16} />
+                Switch
+              </button>
+            )}
             <button
               type="button"
               disabled={!ready}
