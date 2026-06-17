@@ -15,7 +15,7 @@ export function WebcamCapture({ open, onOpenChange, onCapture }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const camerasRef = useRef<MediaDeviceInfo[]>([])
-  const activeDeviceIdRef = useRef<string | undefined>()
+  const activeDeviceIdRef = useRef<string | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
   const [cameraCount, setCameraCount] = useState(0)
