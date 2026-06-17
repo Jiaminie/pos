@@ -806,7 +806,7 @@ function ProductsPageContent() {
           <div className="hidden md:block">
             <table className="w-full text-sm table-fixed">
               <colgroup>
-                <col className="w-11" />
+                <col className="w-20" />
                 <col />
                 <col className="w-[9%]" />
                 <col className="w-[11%]" />
@@ -840,13 +840,13 @@ function ProductsPageContent() {
                   const isLow = stock < LOW_STOCK_THRESHOLD
                   return (
                   <tr key={p.id} className={`hover:bg-gray-50 ${isLow ? 'bg-amber-50/40' : ''}`}>
-                    <td className="px-3 py-2.5">
+                    <td className="px-3 py-3">
                       {p.imageUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={p.imageUrl} alt={p.name} className="w-9 h-9 rounded-md object-cover" />
+                        <img src={p.imageUrl} alt={p.name} className="w-16 h-16 rounded-lg object-cover ring-1 ring-gray-200" />
                       ) : (
-                        <div className="w-9 h-9 rounded-md bg-gray-100 flex items-center justify-center">
-                          <Camera size={14} className="text-gray-400" />
+                        <div className="w-16 h-16 rounded-lg bg-gray-100 flex items-center justify-center ring-1 ring-gray-200">
+                          <Camera size={18} className="text-gray-400" />
                         </div>
                       )}
                     </td>
@@ -932,12 +932,12 @@ function ProductsPageContent() {
               const isLow = stock < LOW_STOCK_THRESHOLD
               return (
                 <div key={p.id} className={`p-4 ${isLow ? 'bg-amber-50/40' : ''}`}>
-                  <div className="flex items-start gap-3">
+                  <div className="flex items-start gap-4">
                     {p.imageUrl ? (
-                      <img src={p.imageUrl} alt={p.name} className="w-12 h-12 rounded-lg object-cover" />
+                      <img src={p.imageUrl} alt={p.name} className="w-24 h-24 rounded-xl object-cover ring-1 ring-gray-200 shrink-0" />
                     ) : (
-                      <div className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">
-                        <Camera size={20} className="text-gray-400" />
+                      <div className="w-24 h-24 rounded-xl bg-gray-100 flex items-center justify-center shrink-0 ring-1 ring-gray-200">
+                        <Camera size={24} className="text-gray-400" />
                       </div>
                     )}
                     <div className="flex-1 min-w-0">
