@@ -21,6 +21,20 @@ export function skuFromName(name: string, spec?: string): string {
   return s.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
 
+/** Ensure SKU is unique — appends -2, -3, … when needed (max 60 chars). */
+export function uniqueSku(base: string, usedSkus: Iterable<string>): string {
+  const sku = base.slice(0, 60) || 'item'
+  const used = new Set(usedSkus)
+  if (!used.has(sku)) return sku
+  let n = 2
+  while (true) {
+    const suffix = `-${n}`
+    const candidate = `${sku.slice(0, 60 - suffix.length)}${suffix}`
+    if (!used.has(candidate)) return candidate
+    n++
+  }
+}
+
 // Clean a product name typed without spaces/casing
 // "BraidedPipe1\"" → "Braided Pipe 1\""
 // "braidedpipe1\"" → "Braidedpipe 1\""

@@ -18,7 +18,7 @@ import { push as pushTx, drain } from '@/lib/db/syncQueue'
 import { replaceCatalogFromServer, seedIfEmpty, syncFromServer } from '@/lib/db/seed'
 import type { CatalogSyncProgress } from '@/lib/db/sync-progress'
 import { initialSyncProgress } from '@/lib/db/sync-progress'
-import { cleanProductName, normalizeQuery, skuFromName } from '@/lib/normalize'
+import { cleanProductName, normalizeQuery, skuFromName, uniqueSku } from '@/lib/normalize'
 import { effectiveLowestPrice, maxDiscountPerUnit, DEFAULT_MIN_MARKUP_PERCENT } from '@/lib/pricing'
 import { fetchSettings } from '@/lib/settings'
 import { computeStock, LOW_STOCK_THRESHOLD } from '@/lib/stock'
@@ -185,7 +185,7 @@ function ProductsPageContent() {
     setForm((f) => ({
       ...f,
       name,
-      ...(!skuTouched.current && { sku: skuFromName(name, f.specification) }),
+      ...(shouldAutoSku() && { sku: skuFromName(name, f.specification) }),
     }))
     checkDuplicates(name)
   }
@@ -195,7 +195,7 @@ function ProductsPageContent() {
     setForm((f) => ({
       ...f,
       name: cleaned,
-      ...(!skuTouched.current && { sku: skuFromName(cleaned, f.specification) }),
+      ...(shouldAutoSku() && { sku: skuFromName(cleaned, f.specification) }),
     }))
     checkDuplicates(cleaned)
   }
@@ -205,8 +205,12 @@ function ProductsPageContent() {
     setForm((f) => ({
       ...f,
       specification,
-      ...(!skuTouched.current && { sku: skuFromName(f.name, specification) }),
+      ...(shouldAutoSku() && { sku: skuFromName(f.name, specification) }),
     }))
+  }
+
+  function shouldAutoSku() {
+    return !editingProduct || !skuTouched.current
   }
 
   function handleSkuChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -316,17 +320,13 @@ function ProductsPageContent() {
           toast.success('Product updated')
         }
       } else {
-        // Check for SKU collision in IDB before attempting insert
-        const existing = products.find((p) => p.sku === form.sku)
-        if (existing) {
-          toast.error(`SKU "${form.sku}" is already used by "${existing.name}"`)
-          return
-        }
+        const baseSku = skuFromName(cleanProductName(form.name), form.specification || undefined) || 'item'
+        const sku = uniqueSku(baseSku, products.map((p) => p.sku))
 
         const product: Product = {
           id: crypto.randomUUID(),
           name: form.name,
-          sku: form.sku,
+          sku,
           specification: form.specification || undefined,
           stockUnit: form.stockUnit || undefined,
           sellingPrice,
@@ -369,7 +369,8 @@ function ProductsPageContent() {
             imageUrl: product.imageUrl ?? null,
           }),
         })
-        setProducts((prev) => [...prev, product])
+        setProducts((prev) => [product, ...prev])
+        setPage(1)
         toast.success('Product saved')
       }
 
@@ -530,9 +531,15 @@ function ProductsPageContent() {
                 </div>
 
                 <div className="space-y-1.5 order-3">
-                  <Label.Root htmlFor="p-sku" className="text-sm font-medium text-gray-700">SKU</Label.Root>
-                  <input id="p-sku" required value={form.sku} onChange={handleSkuChange}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <Label.Root htmlFor={editingProduct ? 'p-sku' : undefined} className="text-sm font-medium text-gray-700">SKU</Label.Root>
+                  {editingProduct ? (
+                    <input id="p-sku" required value={form.sku} onChange={handleSkuChange}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  ) : (
+                    <p className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono text-gray-600 bg-gray-50">
+                      {form.sku || <span className="text-gray-400 font-sans">Generated from product name</span>}
+                    </p>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 order-3">

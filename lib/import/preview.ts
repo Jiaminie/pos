@@ -1,4 +1,4 @@
-import { cleanProductName, normalizeQuery, skuFromName } from '@/lib/normalize'
+import { cleanProductName, normalizeQuery, skuFromName, uniqueSku } from '@/lib/normalize'
 import { resolveCategory } from './categories'
 import type {
   ImportPreviewResult,
@@ -59,13 +59,7 @@ function assignSkus(
   for (const row of rows) {
     let base = row.sku?.trim() || skuFromName(row.name, row.specification || undefined)
     if (!base) base = `item-${row.rowIndex}`
-    let sku = base.slice(0, 60)
-    let n = 2
-    while (used.has(sku)) {
-      const suffix = `-${n}`
-      sku = `${base.slice(0, 60 - suffix.length)}${suffix}`
-      n++
-    }
+    const sku = uniqueSku(base, used)
     used.add(sku)
     out.push({ ...row, sku })
   }
