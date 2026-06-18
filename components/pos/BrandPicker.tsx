@@ -2,35 +2,31 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, Search, X } from 'lucide-react'
-import type { ProductCategory } from '@/lib/types'
 
 type Props = {
-  categories: ProductCategory[]
+  brands: string[]
   counts: Record<string, number>
   value: string
-  onChange: (categoryId: string) => void
+  onChange: (brand: string) => void
 }
 
-export function CategoryPicker({ categories, counts, value, onChange }: Props) {
+export function BrandPicker({ brands, counts, value, onChange }: Props) {
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
 
   const sorted = useMemo(
-    () => [...categories].sort((a, b) => a.name.localeCompare(b.name)),
-    [categories],
+    () => [...brands].sort((a, b) => a.localeCompare(b)),
+    [brands],
   )
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase()
     if (!q) return sorted
-    return sorted.filter((c) => c.name.toLowerCase().includes(q))
+    return sorted.filter((b) => b.toLowerCase().includes(q))
   }, [sorted, filter])
 
-  const label =
-    value === 'all'
-      ? 'All categories'
-      : categories.find((c) => c.id === value)?.name ?? 'Category'
+  const label = value === 'all' ? 'All brands' : value
 
   const count = value === 'all' ? counts.all ?? 0 : counts[value] ?? 0
 
@@ -43,8 +39,8 @@ export function CategoryPicker({ categories, counts, value, onChange }: Props) {
     return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [open])
 
-  function pick(id: string) {
-    onChange(id)
+  function pick(brand: string) {
+    onChange(brand)
     setOpen(false)
     setFilter('')
   }
@@ -70,7 +66,7 @@ export function CategoryPicker({ categories, counts, value, onChange }: Props) {
                 autoFocus
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                placeholder="Filter categories…"
+                placeholder="Filter brands…"
                 className="w-full rounded-lg border border-gray-200 pl-8 pr-8 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               {filter && (
@@ -92,24 +88,24 @@ export function CategoryPicker({ categories, counts, value, onChange }: Props) {
                 onClick={() => pick('all')}
                 className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50 ${value === 'all' ? 'bg-blue-50 text-blue-700' : 'text-gray-800'}`}
               >
-                <span className="flex-1 truncate font-medium">All categories</span>
+                <span className="flex-1 truncate font-medium">All brands</span>
                 <span className="text-xs text-gray-400 tabular-nums">{(counts.all ?? 0).toLocaleString()}</span>
                 {value === 'all' && <Check size={14} className="text-blue-600 shrink-0" />}
               </button>
             </li>
             {filtered.length === 0 ? (
-              <li className="px-3 py-4 text-xs text-gray-500 text-center">No categories match</li>
+              <li className="px-3 py-4 text-xs text-gray-500 text-center">No brands match</li>
             ) : (
-              filtered.map((c) => (
-                <li key={c.id}>
+              filtered.map((brand) => (
+                <li key={brand}>
                   <button
                     type="button"
-                    onClick={() => pick(c.id)}
-                    className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50 ${value === c.id ? 'bg-blue-50 text-blue-700' : 'text-gray-800'}`}
+                    onClick={() => pick(brand)}
+                    className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50 ${value === brand ? 'bg-blue-50 text-blue-700' : 'text-gray-800'}`}
                   >
-                    <span className="flex-1 truncate">{c.name}</span>
-                    <span className="text-xs text-gray-400 tabular-nums">{(counts[c.id] ?? 0).toLocaleString()}</span>
-                    {value === c.id && <Check size={14} className="text-blue-600 shrink-0" />}
+                    <span className="flex-1 truncate">{brand}</span>
+                    <span className="text-xs text-gray-400 tabular-nums">{(counts[brand] ?? 0).toLocaleString()}</span>
+                    {value === brand && <Check size={14} className="text-blue-600 shrink-0" />}
                   </button>
                 </li>
               ))

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { ArrowDownToLine, BarChart3, CalendarRange, ChevronDown, ChevronLeft, ChevronRight, Download, FileText, Package, Percent, Search, TrendingUp, X } from 'lucide-react'
+import { BrandPicker } from '@/components/pos/BrandPicker'
 import { CategoryPicker } from '@/components/pos/CategoryPicker'
 import { toast } from 'sonner'
 import { getAll as getTransactions } from '@/lib/db/transactions'
@@ -615,8 +616,8 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      <div className="flex gap-2 items-stretch mb-2">
-        <div className="relative flex-1 min-w-0">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch mb-2">
+        <div className="relative flex-1 min-w-0 w-full">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
           <input
             type="text"
@@ -631,27 +632,25 @@ export default function ReportsPage() {
             </button>
           )}
         </div>
-        {categories.length > 0 && (
-          <CategoryPicker
-            categories={categories}
-            counts={categoryCounts}
-            value={filterCategoryId}
-            onChange={(id) => { setFilterCategoryId(id); setPage(1) }}
-          />
-        )}
-        {brands.length > 0 && (
-          <select
-            value={filterBrand}
-            onChange={(e) => { setFilterBrand(e.target.value); setPage(1) }}
-            className="shrink-0 border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="all">All brands ({(brandCounts.all ?? 0).toLocaleString()})</option>
-            {brands.map((brand) => (
-              <option key={brand} value={brand}>
-                {brand} ({(brandCounts[brand] ?? 0).toLocaleString()})
-              </option>
-            ))}
-          </select>
+        {(categories.length > 0 || brands.length > 0) && (
+          <div className={`grid gap-2 min-w-0 sm:flex sm:shrink-0 ${categories.length > 0 && brands.length > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            {categories.length > 0 && (
+              <CategoryPicker
+                categories={categories}
+                counts={categoryCounts}
+                value={filterCategoryId}
+                onChange={(id) => { setFilterCategoryId(id); setPage(1) }}
+              />
+            )}
+            {brands.length > 0 && (
+              <BrandPicker
+                brands={brands}
+                counts={brandCounts}
+                value={filterBrand}
+                onChange={(brand) => { setFilterBrand(brand); setPage(1) }}
+              />
+            )}
+          </div>
         )}
       </div>
 

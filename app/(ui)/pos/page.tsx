@@ -2,6 +2,7 @@
 
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { BrandPicker } from '@/components/pos/BrandPicker'
 import { CategoryPicker } from '@/components/pos/CategoryPicker'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Select from '@radix-ui/react-select'
@@ -469,15 +470,15 @@ export default function POSPage() {
         <div className="px-4 md:px-6 pt-4 md:pt-6 pb-2 shrink-0">
           <h1 className="text-xl md:text-2xl font-semibold tracking-tight mb-2 md:mb-4">Point of Sale</h1>
 
-          <div className="flex gap-2 items-stretch">
-            <div className="relative flex-1 min-w-0">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+            <div className="relative flex-1 min-w-0 w-full">
               <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search by name, SKU, brand, category or size…"
-                className="w-full h-full border border-gray-200 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 focus:bg-white transition-colors"
+                className="w-full border border-gray-200 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 focus:bg-white transition-colors"
               />
               {search && (
                 <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
@@ -485,27 +486,25 @@ export default function POSPage() {
                 </button>
               )}
             </div>
-            {categories.length > 0 && (
-              <CategoryPicker
-                categories={categories}
-                counts={categoryCounts}
-                value={activeCategoryId}
-                onChange={setCategory}
-              />
-            )}
-            {brands.length > 0 && (
-              <select
-                value={activeBrand}
-                onChange={(e) => setBrand(e.target.value)}
-                className="shrink-0 border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="all">All brands ({(brandCounts.all ?? 0).toLocaleString()})</option>
-                {brands.map((brand) => (
-                  <option key={brand} value={brand}>
-                    {brand} ({(brandCounts[brand] ?? 0).toLocaleString()})
-                  </option>
-                ))}
-              </select>
+            {(categories.length > 0 || brands.length > 0) && (
+              <div className={`grid gap-2 min-w-0 sm:flex sm:shrink-0 ${categories.length > 0 && brands.length > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                {categories.length > 0 && (
+                  <CategoryPicker
+                    categories={categories}
+                    counts={categoryCounts}
+                    value={activeCategoryId}
+                    onChange={setCategory}
+                  />
+                )}
+                {brands.length > 0 && (
+                  <BrandPicker
+                    brands={brands}
+                    counts={brandCounts}
+                    value={activeBrand}
+                    onChange={setBrand}
+                  />
+                )}
+              </div>
             )}
           </div>
 
