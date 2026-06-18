@@ -14,15 +14,18 @@ export async function GET(request: NextRequest) {
     );
     const cursor = searchParams.get("cursor") ?? undefined;
     const category = searchParams.get("category") ?? undefined;
+    const brand = searchParams.get("brand") ?? undefined;
     const search = searchParams.get("search") ?? undefined;
 
     const where = {
       ...(category ? { category } : {}),
+      ...(brand ? { brand: { equals: brand, mode: "insensitive" as const } } : {}),
       ...(search
         ? {
             OR: [
               { name: { contains: search, mode: "insensitive" as const } },
               { sku: { contains: search, mode: "insensitive" as const } },
+              { brand: { contains: search, mode: "insensitive" as const } },
             ],
           }
         : {}),
@@ -41,7 +44,7 @@ export async function GET(request: NextRequest) {
 
     // Total count on first page only — used for sync progress UI
     const total =
-      !cursor && !category && !search
+      !cursor && !category && !brand && !search
         ? await prisma.product.count({ where })
         : undefined;
 
@@ -58,11 +61,11 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, name, sku, sellingPrice, costPrice, lowestPrice, imageUrl, category, specification, stockUnit } = body;
+    const { id, name, sku, sellingPrice, costPrice, lowestPrice, imageUrl, category, brand, specification, stockUnit } = body;
 
-    if (!name || !sku || sellingPrice == null || costPrice == null) {
+    if (!name || !sku || !brand?.trim() || sellingPrice == null || costPrice == null) {
       return Response.json(
-        { data: null, error: "name, sku, sellingPrice, costPrice are required" },
+        { data: null, error: "name, sku, brand, sellingPrice, costPrice are required" },
         { status: 400 }
       );
     }
@@ -75,6 +78,7 @@ export async function POST(request: NextRequest) {
         ...(id ? { id } : {}),
         name,
         sku,
+        brand: brand.trim().toUpperCase(),
         sellingPrice,
         costPrice,
         lowestPrice: lowestPrice ?? null,

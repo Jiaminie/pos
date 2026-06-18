@@ -44,6 +44,7 @@ export async function commitImportBatch(
     costPrice: number
     lowestPrice: null
     category: string
+    brand: string
     imageUrl: null
     stockUnit: string
     quantity: string | null
@@ -61,6 +62,7 @@ export async function commitImportBatch(
       costPrice: row.costPrice,
       lowestPrice: null as null,
       category: row.category,
+      brand: row.brand,
       imageUrl: null as null,
       stockUnit: 'pcs',
       quantity: row.openingStock > 0 ? `${row.openingStock} pcs` : null,

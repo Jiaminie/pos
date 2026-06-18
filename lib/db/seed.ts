@@ -1,6 +1,7 @@
 import { upsertMany as upsertCategories, replaceAll as replaceCategories, clearAll as clearCategories } from './categories'
 import { upsertMany as upsertProducts, replaceAll as replaceProducts, clearAll as clearProducts } from './products'
 import { clearAll as clearTransactions } from './transactions'
+import { inferBrand, normalizeBrand } from '../brands'
 import type { Product, ProductCategory } from '../types'
 import type { CatalogSyncProgress } from './sync-progress'
 import { initialSyncProgress } from './sync-progress'
@@ -80,6 +81,9 @@ async function fetchCatalogFromServer(
 
     const recentNames: string[] = []
     for (const p of data) {
+      const brand = normalizeBrand(
+        p.brand?.trim() || inferBrand({ name: p.name, sku: p.sku, brand: '' }),
+      )
       products.push({
         id: p.id,
         name: p.name,
@@ -90,6 +94,7 @@ async function fetchCatalogFromServer(
         costPrice: Number(p.costPrice),
         lowestPrice: p.lowestPrice != null ? Number(p.lowestPrice) : undefined,
         categoryId: p.category ? slugify(p.category) : 'uncategorised',
+        brand,
         imageUrl: p.imageUrl ?? undefined,
         initialStock: parseInitialStock(p.quantity),
         createdAt: p.createdAt ? new Date(p.createdAt).toISOString() : undefined,

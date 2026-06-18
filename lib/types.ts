@@ -13,6 +13,7 @@ export type Product = {
   costPrice: number
   lowestPrice?: number
   categoryId: string
+  brand: string
   imageUrl?: string
   initialStock?: number
   createdAt?: string

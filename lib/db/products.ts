@@ -55,3 +55,16 @@ export async function getByCategory(categoryId: string): Promise<Product[]> {
     req.onerror = () => reject(req.error)
   })
 }
+
+export async function getByBrand(brand: string): Promise<Product[]> {
+  const db = await openDb()
+  return new Promise((resolve, reject) => {
+    const index = db
+      .transaction('products', 'readonly')
+      .objectStore('products')
+      .index('brand')
+    const req = index.getAll(brand)
+    req.onsuccess = () => resolve(req.result as Product[])
+    req.onerror = () => reject(req.error)
+  })
+}

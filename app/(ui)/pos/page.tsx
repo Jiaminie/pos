@@ -17,7 +17,7 @@ import { getAll as getTransactions } from '@/lib/db/transactions'
 import { createMany as createManyIncidents, pushMany as pushManyIncidents, drain as drainIncident } from '@/lib/db/incidents'
 import { seedIfEmpty, syncFromServer } from '@/lib/db/seed'
 import { buildStockByProductId, getLowStockItems, LOW_STOCK_THRESHOLD } from '@/lib/stock'
-import { getBrandOptions, inferBrand, matchesProductSearch } from '@/lib/brands'
+import { getBrandOptions, getProductBrand, matchesProductSearch } from '@/lib/brands'
 import { getDeviceId } from '@/lib/device'
 import { INCIDENT_REASON_LABELS } from '@/lib/types'
 import { fetchSettings } from '@/lib/settings'
@@ -164,7 +164,7 @@ export default function POSPage() {
   const brandCounts = useMemo(() => {
     const counts: Record<string, number> = { all: products.length }
     for (const product of products) {
-      const brand = inferBrand(product)
+      const brand = getProductBrand(product)
       counts[brand] = (counts[brand] ?? 0) + 1
     }
     return counts
@@ -176,8 +176,8 @@ export default function POSPage() {
         nameN: normalizeQuery(product.name),
         skuN: normalizeQuery(product.sku),
         specN: normalizeQuery(product.specification ?? ''),
-        brand: inferBrand(product),
-        brandN: normalizeQuery(inferBrand(product)),
+        brand: getProductBrand(product),
+        brandN: normalizeQuery(getProductBrand(product)),
       })),
     [products],
   )

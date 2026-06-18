@@ -215,9 +215,23 @@ const items = [
 ]
 
 async function main() {
+  function inferBrandFromName(name: string): string {
+    const token = name.trim().split(/\s+/)[0]?.replace(/[^a-zA-Z0-9]/g, '') ?? ''
+    return token.length >= 2 ? token.toUpperCase() : 'UNBRANDED'
+  }
+
   console.log('Seeding products...')
   for (const item of items) {
-    await prisma.product.create({ data: item })
+    const sku = item.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60)
+    await prisma.product.create({
+      data: {
+        ...item,
+        sku,
+        brand: inferBrandFromName(item.name),
+        sellingPrice: 0,
+        costPrice: 0,
+      },
+    })
   }
   console.log(`Successfully seeded ${items.length} products!`)
 }

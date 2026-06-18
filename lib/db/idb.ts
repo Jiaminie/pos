@@ -3,7 +3,7 @@
 // Never unconditionally drop stores — that wipes user data.
 
 const DB_NAME = 'pos'
-const DB_VERSION = 5
+const DB_VERSION = 6
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
@@ -32,6 +32,7 @@ export function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains('products')) {
         const prodStore = db.createObjectStore('products', { keyPath: 'id' })
         prodStore.createIndex('categoryId', 'categoryId')
+        prodStore.createIndex('brand', 'brand')
         prodStore.createIndex('sku', 'sku', { unique: true })
       }
 
@@ -54,6 +55,14 @@ export function openDb(): Promise<IDBDatabase> {
 
       if (!db.objectStoreNames.contains('incidentQueue')) {
         db.createObjectStore('incidentQueue', { keyPath: 'id' })
+      }
+
+      // v6: brand index for catalog filtering
+      if (oldVersion < 6 && db.objectStoreNames.contains('products')) {
+        const prodStore = (event.target as IDBOpenDBRequest).transaction!.objectStore('products')
+        if (!prodStore.indexNames.contains('brand')) {
+          prodStore.createIndex('brand', 'brand')
+        }
       }
     }
 

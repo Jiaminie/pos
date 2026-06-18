@@ -1,4 +1,5 @@
 import { cleanProductName, normalizeQuery, skuFromName, uniqueSku } from '@/lib/normalize'
+import { inferBrand, normalizeBrand } from '@/lib/brands'
 import { resolveCategory } from './categories'
 import type {
   ImportPreviewResult,
@@ -93,6 +94,7 @@ function buildPreviewRow(
     specification: row.specification || undefined,
     sku: row.sku,
     category: resolveCategory(row.categoryRaw, name),
+    brand: normalizeBrand(inferBrand({ name, sku: row.sku, brand: '' })),
     openingStock: row.openingStock,
     costPrice: row.costPrice,
     sellingPrice: row.sellingPrice,

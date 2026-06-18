@@ -12,7 +12,7 @@ import { getAll as getCategories } from '@/lib/db/categories'
 import { getAll as getIncidents } from '@/lib/db/incidents'
 import { seedIfEmpty, syncFromServer } from '@/lib/db/seed'
 import { buildStockByProductId, getLowStockItems, LOW_STOCK_THRESHOLD } from '@/lib/stock'
-import { getBrandOptions, inferBrand, matchesProductSearch } from '@/lib/brands'
+import { getBrandOptions, getProductBrand, matchesProductSearch } from '@/lib/brands'
 import { normalizeQuery } from '@/lib/normalize'
 import { INCIDENT_REASON_LABELS } from '@/lib/types'
 import type { InventoryTransaction, Product, ProductCategory, Incident } from '@/lib/types'
@@ -185,7 +185,7 @@ export default function ReportsPage() {
   const brandCounts = useMemo(() => {
     const counts: Record<string, number> = { all: products.length }
     for (const product of products) {
-      const brand = inferBrand(product)
+      const brand = getProductBrand(product)
       counts[brand] = (counts[brand] ?? 0) + 1
     }
     return counts
@@ -250,7 +250,7 @@ export default function ReportsPage() {
     if (activityFilter === 'stocked' && !r.isStockOnly) return false
     const p = productMap[r.productId]
     if (filterCategoryId !== 'all' && p?.categoryId !== filterCategoryId) return false
-    if (filterBrand !== 'all' && p && inferBrand(p) !== filterBrand) return false
+    if (filterBrand !== 'all' && p && getProductBrand(p) !== filterBrand) return false
     if (!p) return !nq
     return matchesProductSearch(p, nq, categoryMap[p.categoryId] ?? '')
   })

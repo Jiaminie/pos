@@ -298,6 +298,7 @@ export function BulkUploadWizard({ open, onOpenChange, onComplete }: Props) {
                         <th className="text-left px-3 py-2">Name</th>
                         <th className="text-left px-3 py-2">Spec / Size</th>
                         <th className="text-left px-3 py-2">SKU</th>
+                        <th className="text-left px-3 py-2">Brand</th>
                         <th className="text-left px-3 py-2">Category</th>
                         <th className="text-right px-3 py-2">In stock</th>
                         <th className="text-right px-3 py-2">Selling</th>
@@ -460,6 +461,7 @@ function PreviewRow({ row }: { row: ImportPreviewRow }) {
       <td className="px-3 py-2 font-medium">{row.name}</td>
       <td className="px-3 py-2 text-xs text-gray-500">{row.specification ?? '—'}</td>
       <td className="px-3 py-2 font-mono text-xs text-gray-500">{row.sku}</td>
+      <td className="px-3 py-2 text-xs text-gray-500 font-medium">{row.brand}</td>
       <td className="px-3 py-2 text-xs text-gray-500">{row.category}</td>
       <td className="px-3 py-2 text-right text-xs">{row.openingStock}</td>
       <td className="px-3 py-2 text-right">{row.sellingPrice > 0 ? row.sellingPrice.toLocaleString() : '—'}</td>

@@ -21,7 +21,7 @@ import type { CatalogSyncProgress } from '@/lib/db/sync-progress'
 import { initialSyncProgress } from '@/lib/db/sync-progress'
 import { ADDED_RANGES, isInAddedRange, type AddedRange } from '@/lib/dates'
 import { cleanProductName, normalizeQuery, skuFromName, uniqueSku } from '@/lib/normalize'
-import { getBrandOptions, inferBrand, matchesProductSearch } from '@/lib/brands'
+import { getBrandOptions, getProductBrand, matchesProductSearch, normalizeBrand } from '@/lib/brands'
 import { effectiveLowestPrice, maxDiscountPerUnit, DEFAULT_MIN_MARKUP_PERCENT } from '@/lib/pricing'
 import { fetchSettings } from '@/lib/settings'
 import { buildStockByProductId, LOW_STOCK_THRESHOLD } from '@/lib/stock'
@@ -30,7 +30,7 @@ import type { Product, ProductCategory, InventoryTransaction } from '@/lib/types
 const emptyForm = {
   name: '', sku: '', specification: '', stockUnit: 'pcs',
   sellingPrice: '', costPrice: '', lowestPrice: '',
-  openingStock: '', addStock: '', categoryId: '', newCategory: '', imageUrl: '',
+  openingStock: '', addStock: '', brand: '', categoryId: '', newCategory: '', imageUrl: '',
 }
 const PAGE_SIZE = 20
 
@@ -286,6 +286,7 @@ function ProductsPageContent() {
       openingStock: '',
       addStock: '',
       categoryId: p.categoryId ?? '',
+      brand: getProductBrand(p),
       newCategory: '',
       imageUrl: p.imageUrl ?? '',
     })
@@ -306,6 +307,11 @@ function ProductsPageContent() {
       }
 
       const categoryName = categories.find((c) => c.id === categoryId)?.name ?? null
+      const brand = normalizeBrand(form.brand)
+      if (!brand) {
+        toast.error('Brand is required')
+        return
+      }
       const sellingPrice = parseFloat(form.sellingPrice) || 0
       const costPrice = parseFloat(form.costPrice) || 0
       const lowestPrice = form.lowestPrice.trim() ? parseFloat(form.lowestPrice) : undefined
@@ -326,6 +332,7 @@ function ProductsPageContent() {
           costPrice,
           lowestPrice,
           categoryId,
+          brand,
           ...(form.imageUrl ? { imageUrl: form.imageUrl } : {}),
         }
         await upsertMany([updated])
@@ -341,6 +348,7 @@ function ProductsPageContent() {
             costPrice: updated.costPrice,
             lowestPrice: updated.lowestPrice ?? null,
             category: categoryName,
+            brand: updated.brand,
             imageUrl: updated.imageUrl ?? null,
           }),
         })
@@ -378,6 +386,7 @@ function ProductsPageContent() {
           costPrice,
           lowestPrice,
           categoryId,
+          brand,
           createdAt: new Date().toISOString(),
           ...(form.imageUrl ? { imageUrl: form.imageUrl } : {}),
         }
@@ -412,6 +421,7 @@ function ProductsPageContent() {
             costPrice: product.costPrice,
             lowestPrice: product.lowestPrice ?? null,
             category: categoryName,
+            brand: product.brand,
             imageUrl: product.imageUrl ?? null,
           }),
         })
@@ -445,7 +455,7 @@ function ProductsPageContent() {
   const brandCounts = useMemo(() => {
     const counts: Record<string, number> = { all: products.length }
     for (const product of products) {
-      const brand = inferBrand(product)
+      const brand = getProductBrand(product)
       counts[brand] = (counts[brand] ?? 0) + 1
     }
     return counts
@@ -473,7 +483,7 @@ function ProductsPageContent() {
     const stocks = buildStockByProductId(products, transactions)
     const rows = products
       .filter((product) => filterCategoryId === 'all' || product.categoryId === filterCategoryId)
-      .filter((product) => filterBrand === 'all' || inferBrand(product) === filterBrand)
+      .filter((product) => filterBrand === 'all' || getProductBrand(product) === filterBrand)
       .filter((product) => !filterMissingPrices || product.costPrice <= 0 || product.sellingPrice <= 0)
       .filter((product) => isInAddedRange(product.createdAt, addedFilter))
       .filter((product) => {
@@ -709,6 +719,26 @@ function ProductsPageContent() {
                 )}
 
                 <div className="space-y-1.5 order-3">
+                  <Label.Root htmlFor="p-brand" className="text-sm font-medium text-gray-700">
+                    Brand <span className="text-red-500">*</span>
+                  </Label.Root>
+                  <input
+                    id="p-brand"
+                    list="brand-suggestions"
+                    required
+                    value={form.brand}
+                    onChange={field('brand')}
+                    placeholder="e.g. INGCO"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm uppercase focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <datalist id="brand-suggestions">
+                    {brands.map((b) => (
+                      <option key={b} value={b} />
+                    ))}
+                  </datalist>
+                </div>
+
+                <div className="space-y-1.5 order-3">
                   <Label.Root className="text-sm font-medium text-gray-700">Category</Label.Root>
                   {categories.length > 0 ? (
                     <Select.Root value={form.categoryId} onValueChange={(v) => setForm((f) => ({ ...f, categoryId: v, newCategory: '' }))}>
@@ -920,7 +950,7 @@ function ProductsPageContent() {
                   <th className="text-left px-3 py-3">Name</th>
                   <th className="text-left px-3 py-3">Spec / Size</th>
                   <th className="text-left px-3 py-3">SKU</th>
-                  <th className="text-left px-3 py-3">Category</th>
+                  <th className="text-left px-3 py-3">Brand</th>
                   <th className="text-right px-3 py-3">In stock</th>
                   <th className="text-right px-3 py-3">Sell</th>
                   <th className="text-right px-3 py-3">Lowest</th>
@@ -958,7 +988,7 @@ function ProductsPageContent() {
                       {!p.specification && !p.stockUnit && <span className="text-gray-300">—</span>}
                     </td>
                     <td className="px-3 py-2.5 font-mono text-xs text-gray-500 truncate" title={p.sku}>{p.sku}</td>
-                    <td className="px-3 py-2.5 text-gray-500 truncate" title={categoryMap[p.categoryId]}>{categoryMap[p.categoryId] ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-gray-500 truncate font-medium" title={getProductBrand(p)}>{getProductBrand(p)}</td>
                     <td className="px-3 py-2.5 text-right">
                       <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${stock <= 0 ? 'bg-red-100 text-red-700' : isLow ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
                         {stock <= 0 ? 'Out' : stock.toLocaleString()}
@@ -1054,6 +1084,7 @@ function ProductsPageContent() {
                         </button>
                       </div>
                       <p className="text-xs text-gray-500 font-mono">{p.sku}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{getProductBrand(p)}</p>
                       <div className="mt-2 flex items-center justify-between text-xs">
                         <span className={`font-semibold px-2 py-0.5 rounded-full ${stock <= 0 ? 'bg-red-100 text-red-700' : isLow ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
                           {stock <= 0 ? 'Out of stock' : `${stock.toLocaleString()} ${p.stockUnit ?? 'units'}`}

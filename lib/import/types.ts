@@ -37,6 +37,7 @@ export type ImportPreviewRow = {
   specification?: string
   sku: string
   category: string
+  brand: string
   openingStock: number
   costPrice: number
   sellingPrice: number

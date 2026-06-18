@@ -17,12 +17,14 @@ model Product {
   lowestPrice   Decimal? @map("lowest_price")
   imageUrl      String?  @map("image_url")
   category      String?
+  brand         String   @default("UNBRANDED")
   quantity      String?
   createdAt     DateTime @default(now()) @map("created_at")
 
   transactions InventoryTransaction[]
   incidents    Incident[]
 
+  @@index([brand])
   @@map("products")
 }
 

@@ -8,7 +8,7 @@ const nav = [
   { href: '/dashboard', label: 'Dashboard',  icon: LayoutDashboard },
   { href: '/products',  label: 'Products',   icon: Store },
   { href: '/pos',       label: 'POS',        icon: ShoppingCart },
-  { href: '/categories',label: 'Categories', icon: LayoutGrid },
+  { href: '/categories',label: 'Brands',     icon: LayoutGrid },
   { href: '/reports',   label: 'Reports',    icon: BarChart3 },
   { href: '/settings',  label: 'Settings',   icon: Settings },
 ]
