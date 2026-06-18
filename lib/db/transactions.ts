@@ -29,3 +29,15 @@ export async function create(tx: InventoryTransaction): Promise<void> {
     idbTx.onerror = () => reject(idbTx.error)
   })
 }
+
+export async function createMany(items: InventoryTransaction[]): Promise<void> {
+  if (items.length === 0) return
+  const db = await openDb()
+  await new Promise<void>((resolve, reject) => {
+    const idbTx = db.transaction('transactions', 'readwrite')
+    const store = idbTx.objectStore('transactions')
+    for (const item of items) store.add(item)
+    idbTx.oncomplete = () => resolve()
+    idbTx.onerror = () => reject(idbTx.error)
+  })
+}

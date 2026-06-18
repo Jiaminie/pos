@@ -1,20 +1,22 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { CategoryPicker } from '@/components/pos/CategoryPicker'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Select from '@radix-ui/react-select'
 import { AlertCircle, ChevronDown, Eye, FileText, ImageOff, Minus, Plus, Search, ShoppingCart, Trash2, WifiOff, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { create } from '@/lib/db/transactions'
-import { push, drain } from '@/lib/db/syncQueue'
+import { createMany as createManyTransactions } from '@/lib/db/transactions'
+import { pushMany, drain } from '@/lib/db/syncQueue'
 import { getAll as getProducts } from '@/lib/db/products'
 import { getAll as getCategories } from '@/lib/db/categories'
 import { normalizeQuery } from '@/lib/normalize'
 import { getAll as getTransactions } from '@/lib/db/transactions'
-import { create as createIncident, push as pushIncident, drain as drainIncident } from '@/lib/db/incidents'
+import { createMany as createManyIncidents, pushMany as pushManyIncidents, drain as drainIncident } from '@/lib/db/incidents'
 import { seedIfEmpty, syncFromServer } from '@/lib/db/seed'
-import { computeStock, getLowStockItems, LOW_STOCK_THRESHOLD } from '@/lib/stock'
+import { buildStockByProductId, getLowStockItems, LOW_STOCK_THRESHOLD } from '@/lib/stock'
+import { getBrandOptions, inferBrand, matchesProductSearch } from '@/lib/brands'
 import { getDeviceId } from '@/lib/device'
 import { INCIDENT_REASON_LABELS } from '@/lib/types'
 import { fetchSettings } from '@/lib/settings'
@@ -37,10 +39,12 @@ interface IncidentDraft {
 }
 
 export default function POSPage() {
+  const router = useRouter()
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<ProductCategory[]>([])
   const [allTransactions, setAllTransactions] = useState<InventoryTransaction[]>([])
   const [activeCategoryId, setActiveCategoryId] = useState<string>('all')
+  const [activeBrand, setActiveBrand] = useState<string>('all')
   const [search, setSearch] = useState('')
   const [productPage, setProductPage] = useState(1)
   const POS_PAGE_SIZE = 48
@@ -65,7 +69,10 @@ export default function POSPage() {
   useEffect(() => {
     try {
       const saved = localStorage.getItem('pos_cart')
-      if (saved) setCart(JSON.parse(saved) as CartItem[])
+      if (saved) {
+        const parsed = JSON.parse(saved) as CartItem[]
+        queueMicrotask(() => setCart(parsed))
+      }
     } catch { /* ignore */ }
   }, [])
 
@@ -75,15 +82,18 @@ export default function POSPage() {
       skipCartPersist.current = false
       return
     }
-    try {
-      localStorage.setItem('pos_cart', JSON.stringify(cart))
-    } catch { /* storage full — ignore */ }
+    const persistTimer = window.setTimeout(() => {
+      try {
+        localStorage.setItem('pos_cart', JSON.stringify(cart))
+      } catch { /* storage full — ignore */ }
+    }, 400)
+    return () => window.clearTimeout(persistTimer)
   }, [cart])
 
   useEffect(() => {
     const onOnline = () => { setOffline(false); drain().catch(() => {}); drainIncident().catch(() => {}) }
     const onOffline = () => setOffline(true)
-    setOffline(!navigator.onLine)
+    queueMicrotask(() => setOffline(!navigator.onLine))
     window.addEventListener('online', onOnline)
     window.addEventListener('offline', onOffline)
     drain().catch(() => {})
@@ -99,28 +109,16 @@ export default function POSPage() {
   }, [])
 
   useEffect(() => {
-    async function load() {
-      const [cats, prods, txs] = await Promise.all([getCategories(), getProducts(), getTransactions()])
-      if (prods.length > 0) {
-        setCategories(cats)
-        setProducts(prods)
-        setAllTransactions(txs)
-      } else {
-        await seedIfEmpty()
-        const [c, p, t] = await Promise.all([getCategories(), getProducts(), getTransactions()])
-        setCategories(c)
-        setProducts(p)
-        setAllTransactions(t)
-      }
-      const synced = await syncFromServer()
-      if (synced) {
-        const [c, p, t] = await Promise.all([getCategories(), getProducts(), getTransactions()])
-        setCategories(c)
-        setProducts(p)
-        setAllTransactions(t)
-      }
+    let cancelled = false
 
-      const low = getLowStockItems(prods, txs)
+    const applySnapshot = (cats: ProductCategory[], prods: Product[], txs: InventoryTransaction[]) => {
+      if (cancelled) return
+      setCategories(cats)
+      setProducts(prods)
+      setAllTransactions(txs)
+
+      const stockByProductId = buildStockByProductId(prods, txs)
+      const low = getLowStockItems(prods, txs, stockByProductId)
       low.forEach(({ product }) => alertedIds.current.add(product.id))
       if (low.length === 1) {
         toast.warning(`Low stock: ${low[0].product.name}`, {
@@ -134,10 +132,54 @@ export default function POSPage() {
         })
       }
     }
-    load()
+
+    async function load() {
+      let [cats, prods, txs] = await Promise.all([getCategories(), getProducts(), getTransactions()])
+      if (prods.length === 0) {
+        await seedIfEmpty()
+        ;[cats, prods, txs] = await Promise.all([getCategories(), getProducts(), getTransactions()])
+      }
+      applySnapshot(cats, prods, txs)
+
+      // Keep initial paint responsive and sync in the background.
+      void syncFromServer().then(async (synced) => {
+        if (!synced || cancelled) return
+        const [nextCats, nextProds, nextTxs] = await Promise.all([getCategories(), getProducts(), getTransactions()])
+        applySnapshot(nextCats, nextProds, nextTxs)
+      })
+    }
+
+    void load()
+    return () => { cancelled = true }
   }, [])
 
-  const nq = normalizeQuery(search.trim())
+  const deferredSearch = useDeferredValue(search)
+  const nq = normalizeQuery(deferredSearch.trim())
+  const stockByProductId = useMemo(
+    () => buildStockByProductId(products, allTransactions),
+    [products, allTransactions],
+  )
+  const brands = useMemo(() => getBrandOptions(products), [products])
+  const brandCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: products.length }
+    for (const product of products) {
+      const brand = inferBrand(product)
+      counts[brand] = (counts[brand] ?? 0) + 1
+    }
+    return counts
+  }, [products])
+  const searchableProducts = useMemo(
+    () =>
+      products.map((product) => ({
+        product,
+        nameN: normalizeQuery(product.name),
+        skuN: normalizeQuery(product.sku),
+        specN: normalizeQuery(product.specification ?? ''),
+        brand: inferBrand(product),
+        brandN: normalizeQuery(inferBrand(product)),
+      })),
+    [products],
+  )
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = { all: products.length }
     for (const p of products) counts[p.categoryId] = (counts[p.categoryId] ?? 0) + 1
@@ -151,16 +193,20 @@ export default function POSPage() {
 
   const visible = useMemo(
     () =>
-      products
-        .filter((p) => activeCategoryId === 'all' || p.categoryId === activeCategoryId)
+      searchableProducts
+        .filter(({ product }) => activeCategoryId === 'all' || product.categoryId === activeCategoryId)
+        .filter(({ brand }) => activeBrand === 'all' || brand === activeBrand)
         .filter(
-          (p) =>
+          ({ product, nameN, skuN, specN, brandN }) =>
             !nq ||
-            normalizeQuery(p.name).includes(nq) ||
-            normalizeQuery(p.sku).includes(nq) ||
-            normalizeQuery(p.specification ?? '').includes(nq),
-        ),
-    [products, activeCategoryId, nq],
+            nameN.includes(nq) ||
+            skuN.includes(nq) ||
+            specN.includes(nq) ||
+            brandN.includes(nq) ||
+            matchesProductSearch(product, nq, categoryMap[product.categoryId] ?? ''),
+        )
+        .map(({ product }) => product),
+    [searchableProducts, activeCategoryId, activeBrand, nq, categoryMap],
   )
 
   const productPageCount = Math.max(1, Math.ceil(visible.length / POS_PAGE_SIZE))
@@ -171,6 +217,11 @@ export default function POSPage() {
 
   function setCategory(id: string) {
     setActiveCategoryId(id)
+    setProductPage(1)
+  }
+
+  function setBrand(brand: string) {
+    setActiveBrand(brand)
     setProductPage(1)
   }
 
@@ -185,6 +236,15 @@ export default function POSPage() {
       if (existing) return prev.map((i) => i.id === product.id ? { ...i, qty: i.qty + 1 } : i)
       return [...prev, { ...product, qty: 1, unitPrice: product.sellingPrice }]
     })
+  }
+
+  function handleProductClick(product: Product) {
+    const stock = stockByProductId[product.id] ?? (product.initialStock ?? 0)
+    if (stock < LOW_STOCK_THRESHOLD) {
+      router.push(`/products?restock=${encodeURIComponent(product.id)}`)
+      return
+    }
+    addToCart(product)
   }
 
   function setQty(id: string, delta: number) {
@@ -235,10 +295,7 @@ export default function POSPage() {
     setChecking(true)
     const orderId = crypto.randomUUID()
     const now = new Date().toISOString()
-    const newTxs: InventoryTransaction[] = []
-
-    for (const item of cart) {
-      const tx: InventoryTransaction = {
+    const newTxs: InventoryTransaction[] = cart.map((item) => ({
         id: crypto.randomUUID(),
         type: 'SALE',
         productId: item.id,
@@ -246,11 +303,9 @@ export default function POSPage() {
         unitPrice: item.unitPrice,
         orderId,
         createdAt: now,
-      }
-      await create(tx)
-      await push(tx)
-      newTxs.push(tx)
-    }
+      }))
+    await createManyTransactions(newTxs)
+    await pushMany(newTxs)
 
     const updatedTxs = [...allTransactions, ...newTxs]
     setAllTransactions(updatedTxs)
@@ -260,7 +315,8 @@ export default function POSPage() {
     setChecking(false)
     drain().catch(() => {})
 
-    const nowLow = getLowStockItems(products, updatedTxs)
+    const updatedStockByProductId = buildStockByProductId(products, updatedTxs)
+    const nowLow = getLowStockItems(products, updatedTxs, updatedStockByProductId)
     const newlyLow = nowLow.filter(({ product }) => !alertedIds.current.has(product.id))
     newlyLow.forEach(({ product }) => alertedIds.current.add(product.id))
 
@@ -329,10 +385,12 @@ export default function POSPage() {
 
   // Incidents
   const incidentNq = normalizeQuery(incidentSearch.trim())
-  const incidentProducts = products.filter((p) =>
-    !incidentNq ||
-    normalizeQuery(p.name).includes(incidentNq) ||
-    normalizeQuery(p.sku).includes(incidentNq)
+  const incidentProducts = useMemo(
+    () =>
+      searchableProducts
+        .filter(({ nameN, skuN }) => !incidentNq || nameN.includes(incidentNq) || skuN.includes(incidentNq))
+        .map(({ product }) => product),
+    [searchableProducts, incidentNq],
   )
 
   function toggleIncidentProduct(p: Product) {
@@ -374,19 +432,17 @@ export default function POSPage() {
     try {
       const deviceId = getDeviceId()
       const now = new Date().toISOString()
-      for (const draft of incidentDrafts) {
-        const inc = {
-          id: crypto.randomUUID(),
-          productId: draft.productId,
-          productName: draft.productName,
-          reason: draft.reason,
-          note: draft.note || undefined,
-          deviceId,
-          createdAt: now,
-        }
-        await createIncident(inc)
-        await pushIncident(inc)
-      }
+      const incidents = incidentDrafts.map((draft) => ({
+        id: crypto.randomUUID(),
+        productId: draft.productId,
+        productName: draft.productName,
+        reason: draft.reason,
+        note: draft.note || undefined,
+        deviceId,
+        createdAt: now,
+      }))
+      await createManyIncidents(incidents)
+      await pushManyIncidents(incidents)
       drainIncident().catch(() => {})
       toast.success(`${incidentDrafts.length} missed sale${incidentDrafts.length !== 1 ? 's' : ''} logged`)
       setIncidentOpen(false)
@@ -420,7 +476,7 @@ export default function POSPage() {
                 type="text"
                 value={search}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by name, SKU or size…"
+                placeholder="Search by name, SKU, brand, category or size…"
                 className="w-full h-full border border-gray-200 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 focus:bg-white transition-colors"
               />
               {search && (
@@ -437,6 +493,20 @@ export default function POSPage() {
                 onChange={setCategory}
               />
             )}
+            {brands.length > 0 && (
+              <select
+                value={activeBrand}
+                onChange={(e) => setBrand(e.target.value)}
+                className="shrink-0 border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">All brands ({(brandCounts.all ?? 0).toLocaleString()})</option>
+                {brands.map((brand) => (
+                  <option key={brand} value={brand}>
+                    {brand} ({(brandCounts[brand] ?? 0).toLocaleString()})
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
@@ -445,6 +515,7 @@ export default function POSPage() {
               {activeCategoryId !== 'all' && categoryMap[activeCategoryId]
                 ? ` in ${categoryMap[activeCategoryId]}`
                 : ''}
+              {activeBrand !== 'all' ? ` · ${activeBrand}` : ''}
               {nq ? ' matching search' : ''}
             </span>
             {visible.length > POS_PAGE_SIZE && (
@@ -459,10 +530,10 @@ export default function POSPage() {
           {visible.length === 0 ? (
             <div className="text-center mt-16 space-y-2">
               <p className="text-sm text-gray-500">No products found</p>
-              {(activeCategoryId !== 'all' || nq) && (
+              {(activeCategoryId !== 'all' || activeBrand !== 'all' || nq) && (
                 <button
                   type="button"
-                  onClick={() => { setCategory('all'); setSearchQuery('') }}
+                  onClick={() => { setCategory('all'); setBrand('all'); setSearchQuery('') }}
                   className="text-xs text-blue-600 hover:underline"
                 >
                   Clear filters
@@ -473,18 +544,26 @@ export default function POSPage() {
             <>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 pt-3">
               {paginatedVisible.map((p) => {
-                const stock = computeStock(p.id, allTransactions, p.initialStock ?? 0)
+                const stock = stockByProductId[p.id] ?? (p.initialStock ?? 0)
+                const isOut = stock <= 0
                 const isLow = stock < LOW_STOCK_THRESHOLD
                 return (
-                  <button key={p.id} onClick={() => addToCart(p)}
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => handleProductClick(p)}
+                    title={isOut ? 'Out of stock — open Products to restock' : isLow ? 'Low stock — open Products to restock' : undefined}
                     className={`text-left border rounded-xl overflow-hidden transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                      isLow
-                        ? 'border-amber-300 bg-amber-50 hover:border-amber-400'
-                        : 'border-gray-200 hover:border-blue-400 hover:bg-blue-50'
-                    }`}>
+                      isOut
+                        ? 'border-red-300 bg-red-50 hover:border-red-400'
+                        : isLow
+                          ? 'border-amber-300 bg-amber-50 hover:border-amber-400'
+                          : 'border-gray-200 hover:border-blue-400 hover:bg-blue-50'
+                    }`}
+                  >
                     {p.imageUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.imageUrl} alt={p.name} className="w-full h-28 object-cover" />
+                      <img src={p.imageUrl} alt={p.name} loading="lazy" decoding="async" className="w-full h-28 object-cover" />
                     ) : (
                       <div className={`w-full h-28 flex items-center justify-center ${isLow ? 'bg-amber-100/60' : 'bg-gray-100'}`}>
                         <ImageOff size={22} className="text-gray-300" />

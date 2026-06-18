@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Label from '@radix-ui/react-label'
@@ -13,16 +13,17 @@ import { ProductImageField } from '@/components/products/ProductImageField'
 import { toast } from 'sonner'
 import { getAll as getProducts, upsertMany } from '@/lib/db/products'
 import { getAll as getCategories, upsertMany as upsertCategories } from '@/lib/db/categories'
-import { create as createTx, getAll as getTransactions } from '@/lib/db/transactions'
-import { push as pushTx, drain } from '@/lib/db/syncQueue'
+import { createMany as createManyTx, getAll as getTransactions } from '@/lib/db/transactions'
+import { pushMany as pushManyTx, drain } from '@/lib/db/syncQueue'
 import { replaceCatalogFromServer, seedIfEmpty, syncFromServer } from '@/lib/db/seed'
 import type { CatalogSyncProgress } from '@/lib/db/sync-progress'
 import { initialSyncProgress } from '@/lib/db/sync-progress'
 import { ADDED_RANGES, isInAddedRange, type AddedRange } from '@/lib/dates'
 import { cleanProductName, normalizeQuery, skuFromName, uniqueSku } from '@/lib/normalize'
+import { getBrandOptions, inferBrand, matchesProductSearch } from '@/lib/brands'
 import { effectiveLowestPrice, maxDiscountPerUnit, DEFAULT_MIN_MARKUP_PERCENT } from '@/lib/pricing'
 import { fetchSettings } from '@/lib/settings'
-import { computeStock, LOW_STOCK_THRESHOLD } from '@/lib/stock'
+import { buildStockByProductId, LOW_STOCK_THRESHOLD } from '@/lib/stock'
 import type { Product, ProductCategory, InventoryTransaction } from '@/lib/types'
 
 const emptyForm = {
@@ -44,7 +45,10 @@ function ProductsPageContent() {
   const [uploading, setUploading] = useState(false)
   const [dupWarning, setDupWarning] = useState<string[]>([])
   const skuTouched = useRef(false)
+  const restockHandled = useRef<string | null>(null)
+  const [highlightId, setHighlightId] = useState<string | null>(null)
   const [filterCategoryId, setFilterCategoryId] = useState<string>('all')
+  const [filterBrand, setFilterBrand] = useState<string>('all')
   const [filterMissingPrices, setFilterMissingPrices] = useState(false)
   const [stockFilter, setStockFilter] = useState<'all' | 'low' | 'out'>('all')
   const [addedFilter, setAddedFilter] = useState<AddedRange>('all')
@@ -66,7 +70,7 @@ function ProductsPageContent() {
         toast.error('Could not sync from server — check your connection')
         return
       }
-      await loadCatalog()
+      await loadCatalog(false)
       await new Promise((r) => setTimeout(r, 600))
       toast.success(`Catalog refreshed — ${sync.productCount.toLocaleString()} products`)
     } finally {
@@ -75,20 +79,26 @@ function ProductsPageContent() {
     }
   }
 
-  async function loadCatalog() {
-    const [cats, prods, txs] = await Promise.all([getCategories(), getProducts(), getTransactions()])
-    if (prods.length > 0) {
-      setCategories(cats); setProducts(prods); setTransactions(txs)
-    } else {
+  async function loadCatalog(runSync = true) {
+    let [cats, prods, txs] = await Promise.all([getCategories(), getProducts(), getTransactions()])
+    if (prods.length === 0) {
       await seedIfEmpty()
-      const [c, p, t] = await Promise.all([getCategories(), getProducts(), getTransactions()])
-      setCategories(c); setProducts(p); setTransactions(t)
+      ;[cats, prods, txs] = await Promise.all([getCategories(), getProducts(), getTransactions()])
     }
-    const synced = await syncFromServer()
-    if (synced) {
-      const [c, p, t] = await Promise.all([getCategories(), getProducts(), getTransactions()])
-      setCategories(c); setProducts(p); setTransactions(t)
-    }
+    setCategories(cats)
+    setProducts(prods)
+    setTransactions(txs)
+
+    if (!runSync) return
+
+    // Keep screen responsive: sync in background and only refresh when changed.
+    void syncFromServer().then(async (synced) => {
+      if (!synced) return
+      const [nextCats, nextProds, nextTxs] = await Promise.all([getCategories(), getProducts(), getTransactions()])
+      setCategories(nextCats)
+      setProducts(nextProds)
+      setTransactions(nextTxs)
+    })
   }
 
   function setFilter(id: string) {
@@ -109,10 +119,34 @@ function ProductsPageContent() {
   useEffect(() => {
     const stock = searchParams.get('stock')
     if (stock === 'low' || stock === 'out') {
-      setStockFilter(stock)
-      setPage(1)
+      queueMicrotask(() => {
+        setStockFilter(stock)
+        setPage(1)
+      })
     }
   }, [searchParams])
+
+  useEffect(() => {
+    const restockId = searchParams.get('restock')
+    if (!restockId || products.length === 0) return
+    if (restockHandled.current === restockId) return
+
+    const product = products.find((p) => p.id === restockId)
+    if (!product) return
+
+    restockHandled.current = restockId
+    const idx = products.findIndex((p) => p.id === restockId)
+    queueMicrotask(() => {
+      if (idx >= 0) setPage(Math.floor(idx / PAGE_SIZE) + 1)
+      setFilterCategoryId('all')
+      setFilterBrand('all')
+      setStockFilter('all')
+      setFilterMissingPrices(false)
+      setAddedFilter('all')
+      setSearch('')
+      setHighlightId(restockId)
+    })
+  }, [searchParams, products])
 
   async function handleRestock(product: Product) {
     const q = parseInt(restockQtys[product.id] ?? '', 10)
@@ -129,8 +163,8 @@ function ProductsPageContent() {
         quantity: q,
         createdAt: new Date().toISOString(),
       }
-      await createTx(tx)
-      await pushTx(tx)
+      await createManyTx([tx])
+      await pushManyTx([tx])
       drain().catch(() => {})
       setTransactions((prev) => [tx, ...prev])
       setRestockQtys((r) => ({ ...r, [product.id]: '' }))
@@ -182,7 +216,10 @@ function ProductsPageContent() {
     if (!name.trim() || editingProduct) { setDupWarning([]); return }
     const nq = normalizeQuery(name)
     const matches = products
-      .filter((p) => normalizeQuery(p.name).includes(nq) || nq.includes(normalizeQuery(p.name)))
+      .filter((p) => {
+        const nameN = normalizeQuery(p.name)
+        return nameN.includes(nq) || nq.includes(nameN)
+      })
       .map((p) => p.name)
     setDupWarning(matches.slice(0, 3))
   }
@@ -318,8 +355,8 @@ function ProductsPageContent() {
             quantity: addQty,
             createdAt: new Date().toISOString(),
           }
-          await createTx(tx)
-          await pushTx(tx)
+          await createManyTx([tx])
+          await pushManyTx([tx])
           drain().catch(() => {})
           setTransactions((prev) => [tx, ...prev])
           toast.success(`Product updated — +${addQty} ${updated.stockUnit ?? 'units'} added to stock`)
@@ -355,8 +392,8 @@ function ProductsPageContent() {
             quantity: openingQty,
             createdAt: new Date().toISOString(),
           }
-          await createTx(tx)
-          await pushTx(tx)
+          await createManyTx([tx])
+          await pushManyTx([tx])
           drain().catch(() => {})
           setTransactions((prev) => [tx, ...prev])
         }
@@ -403,32 +440,47 @@ function ProductsPageContent() {
     for (const p of products) counts[p.categoryId] = (counts[p.categoryId] ?? 0) + 1
     return counts
   }, [products])
+  const brands = useMemo(() => getBrandOptions(products), [products])
+  const brandCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: products.length }
+    for (const product of products) {
+      const brand = inferBrand(product)
+      counts[brand] = (counts[brand] ?? 0) + 1
+    }
+    return counts
+  }, [products])
 
-  const nq = normalizeQuery(search.trim())
-  const missingPriceCount = products.filter((p) => p.costPrice <= 0 || p.sellingPrice <= 0).length
+  const deferredSearch = useDeferredValue(search)
+  const nq = normalizeQuery(deferredSearch.trim())
+  const stockByProductId = useMemo(
+    () => buildStockByProductId(products, transactions),
+    [products, transactions],
+  )
+  const missingPriceCount = useMemo(
+    () => products.filter((p) => p.costPrice <= 0 || p.sellingPrice <= 0).length,
+    [products],
+  )
   const lowStockCount = useMemo(
     () => products.filter((p) => {
-      const s = computeStock(p.id, transactions, p.initialStock ?? 0)
+      const s = stockByProductId[p.id] ?? (p.initialStock ?? 0)
       return s > 0 && s < LOW_STOCK_THRESHOLD
     }).length,
-    [products, transactions],
+    [products, stockByProductId],
   )
 
   const visible = useMemo(() => {
+    const stocks = buildStockByProductId(products, transactions)
     const rows = products
-      .filter((p) => filterCategoryId === 'all' || p.categoryId === filterCategoryId)
-      .filter((p) => !filterMissingPrices || p.costPrice <= 0 || p.sellingPrice <= 0)
-      .filter((p) => isInAddedRange(p.createdAt, addedFilter))
-      .filter(
-        (p) =>
-          !nq ||
-          normalizeQuery(p.name).includes(nq) ||
-          normalizeQuery(p.sku).includes(nq) ||
-          normalizeQuery(p.specification ?? '').includes(nq),
-      )
-      .map((p) => ({
-        product: p,
-        stock: computeStock(p.id, transactions, p.initialStock ?? 0),
+      .filter((product) => filterCategoryId === 'all' || product.categoryId === filterCategoryId)
+      .filter((product) => filterBrand === 'all' || inferBrand(product) === filterBrand)
+      .filter((product) => !filterMissingPrices || product.costPrice <= 0 || product.sellingPrice <= 0)
+      .filter((product) => isInAddedRange(product.createdAt, addedFilter))
+      .filter((product) => {
+        return matchesProductSearch(product, nq, categoryMap[product.categoryId] ?? '')
+      })
+      .map((product) => ({
+        product,
+        stock: stocks[product.id] ?? (product.initialStock ?? 0),
       }))
       .filter(({ stock }) => {
         if (stockFilter === 'low') return stock > 0 && stock < LOW_STOCK_THRESHOLD
@@ -451,10 +503,38 @@ function ProductsPageContent() {
     }
 
     return rows
-  }, [products, filterCategoryId, filterMissingPrices, addedFilter, nq, transactions, stockFilter])
+  }, [products, transactions, filterCategoryId, filterBrand, filterMissingPrices, addedFilter, nq, stockFilter, categoryMap])
 
   const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE))
   const paginated = visible.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
+  useEffect(() => {
+    if (!highlightId) return
+    const onPage = paginated.some(({ product }) => product.id === highlightId)
+    if (!onPage) return
+
+    const scrollTimer = window.setTimeout(() => {
+      const rows = document.querySelectorAll<HTMLElement>(`[data-product-row="${highlightId}"]`)
+      for (const row of rows) {
+        if (row.offsetParent !== null) {
+          row.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          break
+        }
+      }
+      const inputs = document.querySelectorAll<HTMLInputElement>(`[data-restock-input="${highlightId}"]`)
+      for (const input of inputs) {
+        if (input.offsetParent !== null) {
+          input.focus({ preventScroll: true })
+          break
+        }
+      }
+    }, 100)
+    const clearTimer = window.setTimeout(() => setHighlightId(null), 4000)
+    return () => {
+      window.clearTimeout(scrollTimer)
+      window.clearTimeout(clearTimer)
+    }
+  }, [highlightId, paginated, page])
 
   function pageNumbers(): (number | '…')[] {
     if (pageCount <= 7) return Array.from({ length: pageCount }, (_, i) => i + 1)
@@ -609,7 +689,7 @@ function ProductsPageContent() {
                 ) : (
                   <div className="space-y-1.5 order-3">
                     {(() => {
-                      const currentStock = computeStock(editingProduct.id, transactions, editingProduct.initialStock ?? 0)
+                      const currentStock = stockByProductId[editingProduct.id] ?? (editingProduct.initialStock ?? 0)
                       return (
                         <>
                           <div className="flex items-center justify-between">
@@ -699,7 +779,7 @@ function ProductsPageContent() {
             {missingPriceCount} product{missingPriceCount === 1 ? '' : 's'} need pricing — update cost or selling price.
           </p>
           <button
-            onClick={() => { setFilterMissingPrices(true); setFilter('all'); setStockFilter('all'); setAddedFilter('all'); setPage(1) }}
+            onClick={() => { setFilterMissingPrices(true); setFilter('all'); setFilterBrand('all'); setStockFilter('all'); setAddedFilter('all'); setPage(1) }}
             className="text-xs font-medium text-amber-900 underline hover:no-underline shrink-0"
           >
             Show missing
@@ -714,7 +794,7 @@ function ProductsPageContent() {
             type="text"
             value={search}
             onChange={(e) => handleSearch(e.target.value)}
-            placeholder="Search by name, SKU or specification…"
+            placeholder="Search by name, SKU, brand, category or specification…"
             className="w-full border border-gray-200 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 focus:bg-white transition-colors"
           />
           {search && (
@@ -730,6 +810,20 @@ function ProductsPageContent() {
             value={filterCategoryId}
             onChange={(id) => { setFilter(id); setPage(1) }}
           />
+        )}
+        {brands.length > 0 && (
+          <select
+            value={filterBrand}
+            onChange={(e) => { setFilterBrand(e.target.value); setPage(1) }}
+            className="shrink-0 border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="all">All brands ({(brandCounts.all ?? 0).toLocaleString()})</option>
+            {brands.map((brand) => (
+              <option key={brand} value={brand}>
+                {brand} ({(brandCounts[brand] ?? 0).toLocaleString()})
+              </option>
+            ))}
+          </select>
         )}
       </div>
 
@@ -750,7 +844,7 @@ function ProductsPageContent() {
           ))}
           {missingPriceCount > 0 && (
             <button
-              onClick={() => { setFilterMissingPrices(true); setFilter('all'); setStockFilter('all'); setAddedFilter('all'); setPage(1) }}
+              onClick={() => { setFilterMissingPrices(true); setFilter('all'); setFilterBrand('all'); setStockFilter('all'); setAddedFilter('all'); setPage(1) }}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterMissingPrices ? 'bg-amber-600 text-white' : 'bg-amber-100 text-amber-800 hover:bg-amber-200'}`}
             >
               Missing prices ({missingPriceCount})
@@ -775,6 +869,7 @@ function ProductsPageContent() {
         </div>
         <span className="text-xs text-gray-500 ml-auto">
           {visible.length.toLocaleString()} product{visible.length === 1 ? '' : 's'}
+          {filterBrand !== 'all' ? ` · ${filterBrand}` : ''}
         </span>
       </div>
 
@@ -787,6 +882,7 @@ function ProductsPageContent() {
                 onClick={() => {
                   handleSearch('')
                   setFilter('all')
+                  setFilterBrand('all')
                   setStockFilterAndReset('all')
                   setAddedFilterAndReset('all')
                   setFilterMissingPrices(false)
@@ -838,12 +934,17 @@ function ProductsPageContent() {
               <tbody className="divide-y divide-gray-100">
                 {paginated.map(({ product: p, stock }) => {
                   const isLow = stock < LOW_STOCK_THRESHOLD
+                  const isHighlighted = highlightId === p.id
                   return (
-                  <tr key={p.id} className={`hover:bg-gray-50 ${isLow ? 'bg-amber-50/40' : ''}`}>
+                  <tr
+                    key={p.id}
+                    data-product-row={p.id}
+                    className={`hover:bg-gray-50 ${isLow ? 'bg-amber-50/40' : ''} ${isHighlighted ? 'ring-2 ring-inset ring-blue-500 bg-blue-50/60' : ''}`}
+                  >
                     <td className="px-3 py-3">
                       {p.imageUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={p.imageUrl} alt={p.name} className="w-16 h-16 rounded-lg object-cover ring-1 ring-gray-200" />
+                        <img src={p.imageUrl} alt={p.name} loading="lazy" decoding="async" className="w-16 h-16 rounded-lg object-cover ring-1 ring-gray-200" />
                       ) : (
                         <div className="w-16 h-16 rounded-lg bg-gray-100 flex items-center justify-center ring-1 ring-gray-200">
                           <Camera size={18} className="text-gray-400" />
@@ -897,6 +998,7 @@ function ProductsPageContent() {
                     <td className="px-3 py-2.5">
                       <div className="flex items-center gap-1.5 justify-end">
                         <input
+                          data-restock-input={p.id}
                           type="number"
                           min="1"
                           placeholder="Qty"
@@ -930,11 +1032,16 @@ function ProductsPageContent() {
           <div className="md:hidden divide-y divide-gray-100">
             {paginated.map(({ product: p, stock }) => {
               const isLow = stock < LOW_STOCK_THRESHOLD
+              const isHighlighted = highlightId === p.id
               return (
-                <div key={p.id} className={`p-4 ${isLow ? 'bg-amber-50/40' : ''}`}>
+                <div
+                  key={p.id}
+                  data-product-row={p.id}
+                  className={`p-4 ${isLow ? 'bg-amber-50/40' : ''} ${isHighlighted ? 'ring-2 ring-inset ring-blue-500 bg-blue-50/60' : ''}`}
+                >
                   <div className="flex items-start gap-4">
                     {p.imageUrl ? (
-                      <img src={p.imageUrl} alt={p.name} className="w-24 h-24 rounded-xl object-cover ring-1 ring-gray-200 shrink-0" />
+                      <img src={p.imageUrl} alt={p.name} loading="lazy" decoding="async" className="w-24 h-24 rounded-xl object-cover ring-1 ring-gray-200 shrink-0" />
                     ) : (
                       <div className="w-24 h-24 rounded-xl bg-gray-100 flex items-center justify-center shrink-0 ring-1 ring-gray-200">
                         <Camera size={24} className="text-gray-400" />
@@ -958,6 +1065,7 @@ function ProductsPageContent() {
                   </div>
                   <div className="mt-4 flex items-center justify-end gap-2">
                     <input
+                      data-restock-input={p.id}
                       type="number"
                       min="1"
                       placeholder="Add Qty"

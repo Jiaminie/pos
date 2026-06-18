@@ -10,7 +10,8 @@ import { getAll as getProducts } from '@/lib/db/products'
 import { getAll as getCategories } from '@/lib/db/categories'
 import { getAll as getIncidents } from '@/lib/db/incidents'
 import { seedIfEmpty, syncFromServer } from '@/lib/db/seed'
-import { computeStock, getLowStockItems, LOW_STOCK_THRESHOLD } from '@/lib/stock'
+import { buildStockByProductId, getLowStockItems, LOW_STOCK_THRESHOLD } from '@/lib/stock'
+import { getBrandOptions, inferBrand, matchesProductSearch } from '@/lib/brands'
 import { normalizeQuery } from '@/lib/normalize'
 import { INCIDENT_REASON_LABELS } from '@/lib/types'
 import type { InventoryTransaction, Product, ProductCategory, Incident } from '@/lib/types'
@@ -128,6 +129,7 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterCategoryId, setFilterCategoryId] = useState<string>('all')
+  const [filterBrand, setFilterBrand] = useState<string>('all')
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>('all')
   const [page, setPage] = useState(1)
   const [lowStockOpen, setLowStockOpen] = useState(false)
@@ -178,6 +180,19 @@ export default function ReportsPage() {
     for (const p of products) counts[p.categoryId] = (counts[p.categoryId] ?? 0) + 1
     return counts
   }, [products])
+  const brands = useMemo(() => getBrandOptions(products), [products])
+  const brandCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: products.length }
+    for (const product of products) {
+      const brand = inferBrand(product)
+      counts[brand] = (counts[brand] ?? 0) + 1
+    }
+    return counts
+  }, [products])
+  const stockByProductId = useMemo(
+    () => buildStockByProductId(products, transactions),
+    [products, transactions],
+  )
 
   const { start, end } = getRangeBounds(range, customFrom, customTo)
   const rangeLabel = getRangeLabel(range, customFrom, customTo)
@@ -214,7 +229,7 @@ export default function ReportsPage() {
       stocked,
       listRevenue:   listRev,
       revenue:       actRev,
-      netStock:      computeStock(id, transactions, p?.initialStock ?? 0),
+      netStock:      stockByProductId[id] ?? (p?.initialStock ?? 0),
       isStockOnly:   stocked > 0 && sold === 0,
     }
   })
@@ -229,20 +244,15 @@ export default function ReportsPage() {
 
   // Apply search + category filter
   const nq = normalizeQuery(search.trim())
-  const rows = useMemo(() => {
-    return allRows.filter((r) => {
-      if (activityFilter === 'sold' && r.sold === 0) return false
-      if (activityFilter === 'stocked' && !r.isStockOnly) return false
-      const p = productMap[r.productId]
-      if (filterCategoryId !== 'all' && p?.categoryId !== filterCategoryId) return false
-      if (!nq) return true
-      return (
-        normalizeQuery(r.name).includes(nq) ||
-        normalizeQuery(r.sku).includes(nq) ||
-        normalizeQuery(r.specification ?? '').includes(nq)
-      )
-    })
-  }, [allRows, activityFilter, filterCategoryId, nq, productMap])
+  const rows = allRows.filter((r) => {
+    if (activityFilter === 'sold' && r.sold === 0) return false
+    if (activityFilter === 'stocked' && !r.isStockOnly) return false
+    const p = productMap[r.productId]
+    if (filterCategoryId !== 'all' && p?.categoryId !== filterCategoryId) return false
+    if (filterBrand !== 'all' && p && inferBrand(p) !== filterBrand) return false
+    if (!p) return !nq
+    return matchesProductSearch(p, nq, categoryMap[p.categoryId] ?? '')
+  })
 
   function setActivityFilterAndReset(f: ActivityFilter) {
     setActivityFilter(f)
@@ -261,7 +271,7 @@ export default function ReportsPage() {
   const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
   const paginatedRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
-  const lowStockItems = getLowStockItems(products, transactions)
+  const lowStockItems = getLowStockItems(products, transactions, stockByProductId)
   const lowStockCount = lowStockItems.length
   const discountGiven = listRevenue - revenue
   const hasDiscount = discountGiven > 0
@@ -612,7 +622,7 @@ export default function ReportsPage() {
             type="text"
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1) }}
-            placeholder="Search by name, SKU or size…"
+            placeholder="Search by name, SKU, brand, category or size…"
             className="w-full border border-gray-200 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 focus:bg-white transition-colors"
           />
           {search && (
@@ -629,12 +639,27 @@ export default function ReportsPage() {
             onChange={(id) => { setFilterCategoryId(id); setPage(1) }}
           />
         )}
+        {brands.length > 0 && (
+          <select
+            value={filterBrand}
+            onChange={(e) => { setFilterBrand(e.target.value); setPage(1) }}
+            className="shrink-0 border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="all">All brands ({(brandCounts.all ?? 0).toLocaleString()})</option>
+            {brands.map((brand) => (
+              <option key={brand} value={brand}>
+                {brand} ({(brandCounts[brand] ?? 0).toLocaleString()})
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       {!loading && (
         <p className="text-xs text-gray-500 mb-4">
           {rows.length.toLocaleString()} product{rows.length === 1 ? '' : 's'}
           {activityFilter === 'sold' ? ' sold' : activityFilter === 'stocked' ? ' stocked in' : ''}
+          {filterBrand !== 'all' ? ` · ${filterBrand}` : ''}
           {' · '}{rangeLabel}
           {pageCount > 1 ? ` · page ${page} of ${pageCount}` : ''}
         </p>

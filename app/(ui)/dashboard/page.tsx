@@ -1,13 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { BarChart3, Package, ShoppingCart, TrendingUp } from 'lucide-react'
 import { getAll as getTransactions } from '@/lib/db/transactions'
 import { getAll as getProducts } from '@/lib/db/products'
 import { getAll as getIncidents } from '@/lib/db/incidents'
 import { seedIfEmpty, syncFromServer } from '@/lib/db/seed'
-import { computeStock, LOW_STOCK_THRESHOLD } from '@/lib/stock'
+import { buildStockByProductId, LOW_STOCK_THRESHOLD } from '@/lib/stock'
 import type { InventoryTransaction, Product, Incident } from '@/lib/types'
 
 function dayKey(d: Date) {
@@ -69,7 +69,14 @@ export default function DashboardPage() {
     load()
   }, [])
 
-  const productMap = Object.fromEntries(products.map((p) => [p.id, p]))
+  const productMap = useMemo(
+    () => Object.fromEntries(products.map((p) => [p.id, p])),
+    [products],
+  )
+  const stockByProductId = useMemo(
+    () => buildStockByProductId(products, transactions),
+    [products, transactions],
+  )
 
   const start = rangeStart(range)
   const sales = transactions.filter((t) => t.type === 'SALE' && new Date(t.createdAt) >= start)
@@ -79,7 +86,7 @@ export default function DashboardPage() {
   const discountGiven = listRevenue - revenue
 
   const lowStockCount = products.filter((p) => {
-    const stock = computeStock(p.id, transactions, p.initialStock ?? 0)
+    const stock = stockByProductId[p.id] ?? (p.initialStock ?? 0)
     return stock < LOW_STOCK_THRESHOLD
   }).length
 

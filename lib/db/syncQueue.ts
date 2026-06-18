@@ -12,7 +12,19 @@ export async function push(item: InventoryTransaction): Promise<void> {
   })
 }
 
-export async function drain(): Promise<void> {
+export async function pushMany(items: InventoryTransaction[]): Promise<void> {
+  if (items.length === 0) return
+  const db = await openDb()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('syncQueue', 'readwrite')
+    const store = tx.objectStore('syncQueue')
+    for (const item of items) store.put(item)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
+export async function drain(batchSize = 100): Promise<void> {
   if (typeof window === 'undefined' || !navigator.onLine) return
 
   const db = await openDb()
@@ -25,32 +37,35 @@ export async function drain(): Promise<void> {
   if (items.length === 0) return
 
   const deviceId = getDeviceId()
-  const payload = items.map((tx) => ({
-    id: tx.id,
-    productId: tx.productId,
-    // server enum doesn't have STOCK_IN — map to PURCHASE
-    type: tx.type === 'STOCK_IN' ? 'PURCHASE' : tx.type,
-    quantity: tx.quantity,
-    unitPrice: tx.unitPrice ?? null,
-    deviceId,
-    createdAt: tx.createdAt,
-  }))
+  for (let offset = 0; offset < items.length; offset += batchSize) {
+    const batch = items.slice(offset, offset + batchSize)
+    const payload = batch.map((tx) => ({
+      id: tx.id,
+      productId: tx.productId,
+      // server enum doesn't have STOCK_IN — map to PURCHASE
+      type: tx.type === 'STOCK_IN' ? 'PURCHASE' : tx.type,
+      quantity: tx.quantity,
+      unitPrice: tx.unitPrice ?? null,
+      deviceId,
+      createdAt: tx.createdAt,
+    }))
 
-  const res = await fetch('/api/sync', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
+    const res = await fetch('/api/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
 
-  if (!res.ok) return
+    if (!res.ok) return
 
-  // Remove successfully synced items by ID
-  const syncedIds = new Set(items.map((i) => i.id))
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction('syncQueue', 'readwrite')
-    const store = tx.objectStore('syncQueue')
-    syncedIds.forEach((id) => store.delete(id))
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
-  })
+    // Remove successfully synced batch by ID
+    const syncedIds = new Set(batch.map((i) => i.id))
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('syncQueue', 'readwrite')
+      const store = tx.objectStore('syncQueue')
+      syncedIds.forEach((id) => store.delete(id))
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+  }
 }
