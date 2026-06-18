@@ -85,6 +85,12 @@ function ProductsPageContent() {
     if (prods.length === 0) {
       await seedIfEmpty()
       ;[cats, prods, txs] = await Promise.all([getCategories(), getProducts(), getTransactions()])
+      if (prods.length === 0) {
+        const sync = await replaceCatalogFromServer()
+        if (sync.ok) {
+          ;[cats, prods, txs] = await Promise.all([getCategories(), getProducts(), getTransactions()])
+        }
+      }
     }
     setCategories(cats)
     setProducts(prods)

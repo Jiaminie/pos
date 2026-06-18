@@ -1,5 +1,5 @@
-import { upsertMany as upsertCategories, replaceAll as replaceCategories, clearAll as clearCategories } from './categories'
-import { upsertMany as upsertProducts, replaceAll as replaceProducts, clearAll as clearProducts } from './products'
+import { upsertMany as upsertCategories, replaceAll as replaceCategories } from './categories'
+import { upsertMany as upsertProducts, replaceAll as replaceProducts } from './products'
 import { clearAll as clearTransactions } from './transactions'
 import { inferBrand, normalizeBrand } from '../brands'
 import type { Product, ProductCategory } from '../types'
@@ -26,7 +26,7 @@ type SyncOptions = {
   onProgress?: (progress: CatalogSyncProgress) => void
 }
 
-type CatalogFetch = { categories: ProductCategory[]; products: Product[] }
+type CatalogFetch = { categories: ProductCategory[]; products: Product[]; totalProducts?: number }
 
 async function fetchCatalogFromServer(
   onProgress?: (progress: CatalogSyncProgress) => void,
@@ -116,7 +116,9 @@ async function fetchCatalogFromServer(
     })
   } while (cursor)
 
-  return { categories, products }
+  if (totalProducts != null && totalProducts > 0 && products.length === 0) return null
+
+  return { categories, products, totalProducts }
 }
 
 export async function syncFromServer(options: SyncOptions = {}): Promise<boolean> {
@@ -145,10 +147,8 @@ export async function syncFromServer(options: SyncOptions = {}): Promise<boolean
         elapsedMs: 0,
       })
       if (wipeTx) await clearTransactions()
-      await clearProducts()
-      await clearCategories()
-      if (categories.length > 0) await replaceCategories(categories)
-      if (products.length > 0) await replaceProducts(products)
+      await replaceCategories(categories)
+      await replaceProducts(products)
     } else {
       if (categories.length > 0) await upsertCategories(categories)
       if (products.length > 0) await upsertProducts(products)
@@ -207,7 +207,20 @@ export async function replaceCatalogFromServer(
       return { ok: false, productCount: 0 }
     }
 
-    const { categories, products } = catalog
+    const { categories, products, totalProducts } = catalog
+
+    if (totalProducts != null && totalProducts > 0 && products.length === 0) {
+      onProgress?.({
+        phase: 'error',
+        message: 'Download incomplete — local catalog was not changed',
+        productsLoaded: 0,
+        categoriesLoaded: 0,
+        batchIndex: 0,
+        recentNames: [],
+        elapsedMs: elapsed(),
+      })
+      return { ok: false, productCount: 0 }
+    }
 
     onProgress?.({
       phase: 'write',
@@ -221,10 +234,8 @@ export async function replaceCatalogFromServer(
     })
 
     await clearTransactions()
-    await clearProducts()
-    await clearCategories()
-    if (categories.length > 0) await replaceCategories(categories)
-    if (products.length > 0) await replaceProducts(products)
+    await replaceCategories(categories)
+    await replaceProducts(products)
 
     if (typeof window !== 'undefined') {
       localStorage.setItem(SYNC_TS_KEY, String(Date.now()))
@@ -259,12 +270,18 @@ export async function replaceCatalogFromServer(
 export async function seedIfEmpty(): Promise<void> {
   if (typeof window === 'undefined') return
 
-  const synced = await syncFromServer()
+  const { getAll: getLocalProducts } = await import('./products')
+  const existing = await getLocalProducts()
+  if (existing.length > 0) return
+
+  const synced = await syncFromServer({ force: true })
   if (synced) return
 
-  const { getAll } = await import('./products')
-  const existing = await getAll()
-  if (existing.length > 0) return
+  const afterSync = await getLocalProducts()
+  if (afterSync.length > 0) return
+
+  const replaced = await replaceCatalogFromServer()
+  if (replaced.ok) return
 
   await upsertCategories(FALLBACK_CATEGORIES)
 }

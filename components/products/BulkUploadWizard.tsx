@@ -111,17 +111,22 @@ export function BulkUploadWizard({ open, onOpenChange, onComplete }: Props) {
     appendLog('Starting catalog backup…')
 
     try {
+      let backupId: string | undefined
       const backupRes = await fetch('/api/products/import/backup', { method: 'POST' })
       const backupJson = await backupRes.json()
-      if (!backupRes.ok) throw new Error(backupJson.error ?? 'Backup failed')
-
-      const { backupId, manifest } = backupJson.data as {
-        backupId: string
-        manifest: { productCount: number; transactionCount: number }
+      if (!backupRes.ok) {
+        appendLog(`Warning: backup skipped (${backupJson.error ?? 'unavailable on server'}) — continuing import`)
+      } else {
+        const data = backupJson.data as {
+          backupId: string
+          manifest: { productCount: number; transactionCount: number; storage?: string }
+        }
+        backupId = data.backupId
+        const storageNote = data.manifest.storage === 'ephemeral' ? ' (manifest only)' : ''
+        appendLog(
+          `Backup recorded${storageNote} (${data.backupId}): ${data.manifest.productCount} products, ${data.manifest.transactionCount} transactions`,
+        )
       }
-      appendLog(
-        `Backup saved (${backupId}): ${manifest.productCount} products, ${manifest.transactionCount} transactions`,
-      )
 
       const rows = preview.rows.filter((r) => r.status !== 'error')
       const batches: typeof rows[] = []
