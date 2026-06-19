@@ -1,3 +1,37 @@
+export type PosLookupMode = 'catalog' | 'barcode' | 'hybrid'
+
+export const POS_LOOKUP_MODES: {
+  value: PosLookupMode
+  label: string
+  description: string
+}[] = [
+  {
+    value: 'catalog',
+    label: 'Catalog search',
+    description: 'Browse and search by name, SKU, brand, category, and size — best for hardware and building supplies.',
+  },
+  {
+    value: 'barcode',
+    label: 'Barcode scanner',
+    description: 'Scan barcodes to add items instantly — best for retail and convenience stores.',
+  },
+  {
+    value: 'hybrid',
+    label: 'Barcode + catalog',
+    description: 'Scan barcodes or search the full catalog — best for supermarkets and mixed stock.',
+  },
+]
+
+export function parsePosLookupMode(value: unknown): PosLookupMode {
+  if (value === 'barcode' || value === 'hybrid' || value === 'catalog') return value
+  return 'catalog'
+}
+
+export function defaultPosLookupMode(): PosLookupMode {
+  const env = process.env.POS_LOOKUP_MODE
+  return parsePosLookupMode(env)
+}
+
 export interface PDFSettings {
   companyName: string
   tagline: string
@@ -7,6 +41,8 @@ export interface PDFSettings {
   footerText: string
   /** Min sell price as % of cost (150 = 1.5× cost). Drives discount floor in POS. */
   minMarkupPercent: number
+  /** How cashiers find products at the register. */
+  posLookupMode: PosLookupMode
 }
 
 export const DEFAULT_SETTINGS: PDFSettings = {
@@ -17,6 +53,7 @@ export const DEFAULT_SETTINGS: PDFSettings = {
   currency: 'KES',
   footerText: 'Thank you for your business.',
   minMarkupPercent: 150,
+  posLookupMode: 'catalog',
 }
 
 const KEY = 'pos-pdf-settings'
@@ -27,7 +64,12 @@ export function loadSettings(): PDFSettings {
   try {
     const raw = localStorage.getItem(KEY)
     if (!raw) return DEFAULT_SETTINGS
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }
+    const parsed = JSON.parse(raw) as Partial<PDFSettings>
+    return {
+      ...DEFAULT_SETTINGS,
+      ...parsed,
+      posLookupMode: parsePosLookupMode(parsed.posLookupMode),
+    }
   } catch {
     return DEFAULT_SETTINGS
   }
@@ -53,6 +95,7 @@ export async function fetchSettings(): Promise<PDFSettings> {
       currency:     data.currency     ?? DEFAULT_SETTINGS.currency,
       footerText:   data.footerText   ?? DEFAULT_SETTINGS.footerText,
       minMarkupPercent: Number(data.minMarkupPercent ?? DEFAULT_SETTINGS.minMarkupPercent),
+      posLookupMode: parsePosLookupMode(data.posLookupMode),
     }
     cacheSettings(s)
     return s

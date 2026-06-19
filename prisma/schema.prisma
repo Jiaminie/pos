@@ -11,6 +11,7 @@ model Product {
   name          String
   specification String?
   stockUnit     String?  @map("stock_unit")
+  barcode       String?  @unique
   sku           String   @unique
   sellingPrice  Decimal  @map("selling_price")
   costPrice     Decimal  @map("cost_price")
@@ -89,6 +90,7 @@ model StoreSettings {
   currency     String  @default("KES")
   footerText        String   @default("Thank you for your business.") @map("footer_text")
   minMarkupPercent  Decimal  @default(150) @map("min_markup_percent")
+  posLookupMode     String   @default("catalog") @map("pos_lookup_mode")
   updatedAt         DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("store_settings")

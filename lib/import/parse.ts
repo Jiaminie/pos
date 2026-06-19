@@ -44,6 +44,7 @@ function mapRow(
   const costIdx = columnMap.costPrice
   const sellIdx = columnMap.sellingPrice
   const skuIdx = columnMap.sku
+  const barcodeIdx = columnMap.barcode
 
   return {
     rowIndex,
@@ -54,6 +55,7 @@ function mapRow(
     costPrice: costIdx != null ? parsePrice(cells[costIdx]) : 0,
     sellingPrice: sellIdx != null ? parsePrice(cells[sellIdx]) : 0,
     sku: skuIdx != null && cells[skuIdx] ? cells[skuIdx] : undefined,
+    barcode: barcodeIdx != null && cells[barcodeIdx] ? cells[barcodeIdx] : undefined,
   }
 }
 
@@ -114,6 +116,7 @@ function detectColumnMap(headers: string[]): Record<ImportColumnKey, number | nu
     costPrice: null,
     sellingPrice: null,
     sku: null,
+    barcode: null,
   }
 
   headers.forEach((h, i) => {
@@ -125,6 +128,7 @@ function detectColumnMap(headers: string[]): Record<ImportColumnKey, number | nu
     else if (/^(cost|wholesale|buy)/.test(key)) map.costPrice = i
     else if (/^(sell|retail|price|selling)/.test(key) && !/cost/.test(key)) map.sellingPrice = i
     else if (/^sku/.test(key)) map.sku = i
+    else if (/^(barcode|ean|upc|gtin)/.test(key)) map.barcode = i
   })
 
   if (map.name == null) map.name = 0

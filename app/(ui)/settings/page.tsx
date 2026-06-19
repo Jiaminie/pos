@@ -1,9 +1,9 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Building2, Check, FileText, Percent, Upload, X } from 'lucide-react'
+import { Building2, Check, FileText, Percent, ScanBarcode, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { fetchSettings, saveSettings, DEFAULT_SETTINGS, type PDFSettings } from '@/lib/settings'
+import { fetchSettings, saveSettings, DEFAULT_SETTINGS, POS_LOOKUP_MODES, type PDFSettings, type PosLookupMode } from '@/lib/settings'
 
 const COLORS = [
   { label: 'Blue',   value: '#2563eb' },
@@ -15,11 +15,12 @@ const COLORS = [
   { label: 'Gray',   value: '#374151' },
 ]
 
-type SettingsTab = 'store' | 'pricing' | 'documents'
+type SettingsTab = 'store' | 'pricing' | 'pos' | 'documents'
 
 const TABS: { id: SettingsTab; label: string; description: string; icon: typeof Building2 }[] = [
   { id: 'store',     label: 'Store',     description: 'Name, logo & branding',     icon: Building2 },
   { id: 'pricing',   label: 'Pricing',   description: 'POS discount rules',        icon: Percent },
+  { id: 'pos',       label: 'POS',       description: 'Checkout & product lookup', icon: ScanBarcode },
   { id: 'documents', label: 'Documents', description: 'PDF reports & quotations', icon: FileText },
 ]
 
@@ -331,6 +332,57 @@ export default function SettingsPage() {
                     <p className="text-gray-500">max discount per unit = {Math.max(0, 200 - Math.min(200, 100 * settings.minMarkupPercent / 100)).toLocaleString()}</p>
                   </div>
                 </section>
+              </div>
+            )}
+
+            {activeTab === 'pos' && (
+              <div className="space-y-6">
+                <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-800">Product lookup at checkout</h3>
+                    <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
+                      Choose how cashiers find products on the POS screen. Hardware stores typically use catalog search; retail stores use barcode scanning.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    {POS_LOOKUP_MODES.map(({ value, label, description }) => {
+                      const selected = settings.posLookupMode === value
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => set('posLookupMode', value as PosLookupMode)}
+                          className={`w-full text-left rounded-xl border px-4 py-3 transition-colors ${
+                            selected
+                              ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500'
+                              : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={`text-sm font-medium ${selected ? 'text-blue-800' : 'text-gray-800'}`}>
+                              {label}
+                            </span>
+                            {selected && <Check size={16} className="text-blue-600 shrink-0" />}
+                          </div>
+                          <p className={`text-xs mt-1 leading-relaxed ${selected ? 'text-blue-700/80' : 'text-gray-500'}`}>
+                            {description}
+                          </p>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </section>
+
+                {settings.posLookupMode !== 'catalog' && (
+                  <section className="bg-blue-50/60 border border-blue-200/80 rounded-xl p-5 space-y-2">
+                    <h3 className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Barcode mode enabled</h3>
+                    <ul className="text-xs text-blue-900/80 space-y-1.5 list-disc list-inside leading-relaxed">
+                      <li>Add a <strong className="font-medium">Barcode</strong> field when creating or editing products.</li>
+                      <li>USB scanners type into the POS search box — exact match adds the item to the cart.</li>
+                      <li>CSV imports can include a <strong className="font-medium">barcode</strong>, <strong className="font-medium">ean</strong>, or <strong className="font-medium">upc</strong> column.</li>
+                    </ul>
+                  </section>
+                )}
               </div>
             )}
 

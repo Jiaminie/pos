@@ -93,6 +93,7 @@ function buildPreviewRow(
     name,
     specification: row.specification || undefined,
     sku: row.sku,
+    barcode: row.barcode?.trim() || undefined,
     category: resolveCategory(row.categoryRaw, name),
     brand: normalizeBrand(inferBrand({ name, sku: row.sku, brand: '' })),
     openingStock: row.openingStock,

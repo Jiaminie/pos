@@ -18,9 +18,10 @@ import { createMany as createManyIncidents, pushMany as pushManyIncidents, drain
 import { seedIfEmpty, syncFromServer } from '@/lib/db/seed'
 import { buildStockByProductId, getLowStockItems, LOW_STOCK_THRESHOLD } from '@/lib/stock'
 import { getBrandOptions, getProductBrand, matchesProductSearch } from '@/lib/brands'
+import { barcodeSearchEnabled, findProductByExactBarcode } from '@/lib/product-search'
 import { getDeviceId } from '@/lib/device'
 import { INCIDENT_REASON_LABELS } from '@/lib/types'
-import { fetchSettings } from '@/lib/settings'
+import { fetchSettings, type PosLookupMode } from '@/lib/settings'
 import { canDiscount, clampUnitPrice, DEFAULT_MIN_MARKUP_PERCENT, discountPerUnit, effectiveLowestPrice } from '@/lib/pricing'
 import type { Product, ProductCategory, InventoryTransaction, IncidentReason } from '@/lib/types'
 
@@ -62,9 +63,12 @@ export default function POSPage() {
   const [incidentDrafts, setIncidentDrafts] = useState<IncidentDraft[]>([])
   const [incidentSaving, setIncidentSaving] = useState(false)
   const [minMarkupPercent, setMinMarkupPercent] = useState(DEFAULT_MIN_MARKUP_PERCENT)
+  const [posLookupMode, setPosLookupMode] = useState<PosLookupMode>('catalog')
   const [discountEditId, setDiscountEditId] = useState<string | null>(null)
   const alertedIds = useRef<Set<string>>(new Set())
   const skipCartPersist = useRef(true)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const lastBarcodeAdd = useRef('')
 
   // Restore cart from localStorage after mount (avoids SSR/client hydration mismatch)
   useEffect(() => {
@@ -106,8 +110,22 @@ export default function POSPage() {
   }, [])
 
   useEffect(() => {
-    fetchSettings().then((s) => setMinMarkupPercent(s.minMarkupPercent)).catch(() => {})
+    fetchSettings().then((s) => {
+      setMinMarkupPercent(s.minMarkupPercent)
+      setPosLookupMode(s.posLookupMode)
+    }).catch(() => {})
   }, [])
+
+  const barcodeEnabled = barcodeSearchEnabled(posLookupMode)
+  const showCatalogFilters = posLookupMode !== 'barcode'
+  const searchPlaceholder = barcodeEnabled
+    ? 'Scan barcode or search…'
+    : 'Search by name, SKU, brand, category or size…'
+
+  useEffect(() => {
+    if (!barcodeEnabled) return
+    searchInputRef.current?.focus()
+  }, [barcodeEnabled])
 
   useEffect(() => {
     let cancelled = false
@@ -176,6 +194,7 @@ export default function POSPage() {
         nameN: normalizeQuery(product.name),
         skuN: normalizeQuery(product.sku),
         specN: normalizeQuery(product.specification ?? ''),
+        barcodeN: product.barcode ? normalizeQuery(product.barcode) : '',
         brand: getProductBrand(product),
         brandN: normalizeQuery(getProductBrand(product)),
       })),
@@ -198,16 +217,19 @@ export default function POSPage() {
         .filter(({ product }) => activeCategoryId === 'all' || product.categoryId === activeCategoryId)
         .filter(({ brand }) => activeBrand === 'all' || brand === activeBrand)
         .filter(
-          ({ product, nameN, skuN, specN, brandN }) =>
+          ({ product, nameN, skuN, specN, brandN, barcodeN }) =>
             !nq ||
             nameN.includes(nq) ||
             skuN.includes(nq) ||
             specN.includes(nq) ||
             brandN.includes(nq) ||
-            matchesProductSearch(product, nq, categoryMap[product.categoryId] ?? ''),
+            (barcodeEnabled && barcodeN.includes(nq)) ||
+            matchesProductSearch(product, nq, categoryMap[product.categoryId] ?? '', {
+              includeBarcode: barcodeEnabled,
+            }),
         )
         .map(({ product }) => product),
-    [searchableProducts, activeCategoryId, activeBrand, nq, categoryMap],
+    [searchableProducts, activeCategoryId, activeBrand, nq, categoryMap, barcodeEnabled],
   )
 
   const productPageCount = Math.max(1, Math.ceil(visible.length / POS_PAGE_SIZE))
@@ -229,6 +251,7 @@ export default function POSPage() {
   function setSearchQuery(q: string) {
     setSearch(q)
     setProductPage(1)
+    if (!q.trim()) lastBarcodeAdd.current = ''
   }
 
   function addToCart(product: Product) {
@@ -246,6 +269,47 @@ export default function POSPage() {
       return
     }
     addToCart(product)
+  }
+
+  function tryBarcodeAdd(raw: string): boolean {
+    const match = findProductByExactBarcode(products, raw)
+    if (!match) return false
+    const key = `${match.id}:${raw}`
+    if (lastBarcodeAdd.current === key) return true
+    lastBarcodeAdd.current = key
+    const stock = stockByProductId[match.id] ?? (match.initialStock ?? 0)
+    if (stock < LOW_STOCK_THRESHOLD) {
+      router.push(`/products?restock=${encodeURIComponent(match.id)}`)
+    } else {
+      addToCart(match)
+      toast.success(`Added ${match.name}`)
+    }
+    setSearchQuery('')
+    return true
+  }
+
+  useEffect(() => {
+    if (!barcodeEnabled) return
+    const raw = deferredSearch.trim()
+    if (!raw) {
+      lastBarcodeAdd.current = ''
+      return
+    }
+    tryBarcodeAdd(raw)
+  }, [deferredSearch, products, barcodeEnabled, stockByProductId, router])
+
+  function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== 'Enter' || !barcodeEnabled) return
+    const raw = search.trim()
+    if (!raw) return
+    if (tryBarcodeAdd(raw)) {
+      e.preventDefault()
+      return
+    }
+    if (posLookupMode === 'barcode') {
+      e.preventDefault()
+      toast.error('No product found for this barcode')
+    }
   }
 
   function setQty(id: string, delta: number) {
@@ -474,10 +538,12 @@ export default function POSPage() {
             <div className="relative flex-1 min-w-0 w-full">
               <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
               <input
+                ref={searchInputRef}
                 type="text"
                 value={search}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by name, SKU, brand, category or size…"
+                onKeyDown={handleSearchKeyDown}
+                placeholder={searchPlaceholder}
                 className="w-full border border-gray-200 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 focus:bg-white transition-colors"
               />
               {search && (
@@ -486,7 +552,7 @@ export default function POSPage() {
                 </button>
               )}
             </div>
-            {(categories.length > 0 || brands.length > 0) && (
+            {showCatalogFilters && (categories.length > 0 || brands.length > 0) && (
               <div className={`grid gap-2 min-w-0 sm:flex sm:shrink-0 ${categories.length > 0 && brands.length > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
                 {categories.length > 0 && (
                   <CategoryPicker

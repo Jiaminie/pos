@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/server/db'
+import { defaultPosLookupMode, parsePosLookupMode } from '@/lib/settings'
 
 const SINGLETON_ID = 'singleton'
 
@@ -7,7 +8,7 @@ export async function GET() {
     const settings = await prisma.storeSettings.upsert({
       where: { id: SINGLETON_ID },
       update: {},
-      create: { id: SINGLETON_ID },
+      create: { id: SINGLETON_ID, posLookupMode: defaultPosLookupMode() },
     })
     return Response.json({ data: settings, error: null })
   } catch (err) {
@@ -19,7 +20,7 @@ export async function GET() {
 export async function PATCH(req: Request) {
   try {
     const body = await req.json()
-    const { companyName, tagline, logoDataUrl, primaryColor, currency, footerText, minMarkupPercent } = body
+    const { companyName, tagline, logoDataUrl, primaryColor, currency, footerText, minMarkupPercent, posLookupMode } = body
 
     const settings = await prisma.storeSettings.upsert({
       where: { id: SINGLETON_ID },
@@ -31,6 +32,7 @@ export async function PATCH(req: Request) {
         ...(currency     !== undefined && { currency }),
         ...(footerText   !== undefined && { footerText }),
         ...(minMarkupPercent !== undefined && { minMarkupPercent }),
+        ...(posLookupMode !== undefined && { posLookupMode: parsePosLookupMode(posLookupMode) }),
       },
       create: {
         id: SINGLETON_ID,
@@ -41,6 +43,7 @@ export async function PATCH(req: Request) {
         currency:     currency     ?? 'KES',
         footerText:   footerText   ?? 'Thank you for your business.',
         minMarkupPercent: minMarkupPercent ?? 150,
+        posLookupMode: parsePosLookupMode(posLookupMode ?? defaultPosLookupMode()),
       },
     })
     return Response.json({ data: settings, error: null })

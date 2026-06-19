@@ -13,7 +13,9 @@ import { getAll as getIncidents } from '@/lib/db/incidents'
 import { seedIfEmpty, syncFromServer } from '@/lib/db/seed'
 import { buildStockByProductId, getLowStockItems, LOW_STOCK_THRESHOLD } from '@/lib/stock'
 import { getBrandOptions, getProductBrand, matchesProductSearch } from '@/lib/brands'
+import { barcodeSearchEnabled } from '@/lib/product-search'
 import { normalizeQuery } from '@/lib/normalize'
+import { fetchSettings, type PosLookupMode } from '@/lib/settings'
 import { INCIDENT_REASON_LABELS } from '@/lib/types'
 import type { InventoryTransaction, Product, ProductCategory, Incident } from '@/lib/types'
 
@@ -135,6 +137,7 @@ export default function ReportsPage() {
   const [page, setPage] = useState(1)
   const [lowStockOpen, setLowStockOpen] = useState(false)
   const [missedOpen, setMissedOpen] = useState(false)
+  const [posLookupMode, setPosLookupMode] = useState<PosLookupMode>('catalog')
   const PAGE_SIZE = 25
   const LOW_STOCK_PREVIEW = 10
 
@@ -164,7 +167,10 @@ export default function ReportsPage() {
       if (synced) await refreshLocal()
     }
     load()
+    fetchSettings().then((s) => setPosLookupMode(s.posLookupMode)).catch(() => {})
   }, [])
+
+  const includeBarcodeSearch = barcodeSearchEnabled(posLookupMode)
 
   const productMap = useMemo(
     () => Object.fromEntries(products.map((p) => [p.id, p])),
@@ -252,7 +258,9 @@ export default function ReportsPage() {
     if (filterCategoryId !== 'all' && p?.categoryId !== filterCategoryId) return false
     if (filterBrand !== 'all' && p && getProductBrand(p) !== filterBrand) return false
     if (!p) return !nq
-    return matchesProductSearch(p, nq, categoryMap[p.categoryId] ?? '')
+    return matchesProductSearch(p, nq, categoryMap[p.categoryId] ?? '', {
+      includeBarcode: includeBarcodeSearch,
+    })
   })
 
   function setActivityFilterAndReset(f: ActivityFilter) {

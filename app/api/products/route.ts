@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
               { name: { contains: search, mode: "insensitive" as const } },
               { sku: { contains: search, mode: "insensitive" as const } },
               { brand: { contains: search, mode: "insensitive" as const } },
+              { barcode: { contains: search, mode: "insensitive" as const } },
             ],
           }
         : {}),
@@ -61,7 +62,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, name, sku, sellingPrice, costPrice, lowestPrice, imageUrl, category, brand, specification, stockUnit } = body;
+    const { id, name, sku, barcode, sellingPrice, costPrice, lowestPrice, imageUrl, category, brand, specification, stockUnit } = body;
 
     if (!name || !sku || !brand?.trim() || sellingPrice == null || costPrice == null) {
       return Response.json(
@@ -78,6 +79,7 @@ export async function POST(request: NextRequest) {
         ...(id ? { id } : {}),
         name,
         sku,
+        barcode: barcode?.trim() || null,
         brand: brand.trim().toUpperCase(),
         sellingPrice,
         costPrice,

@@ -22,13 +22,14 @@ import { initialSyncProgress } from '@/lib/db/sync-progress'
 import { ADDED_RANGES, isInAddedRange, type AddedRange } from '@/lib/dates'
 import { cleanProductName, normalizeQuery, skuFromName, uniqueSku } from '@/lib/normalize'
 import { getBrandOptions, getProductBrand, matchesProductSearch, normalizeBrand } from '@/lib/brands'
+import { barcodeSearchEnabled } from '@/lib/product-search'
 import { effectiveLowestPrice, maxDiscountPerUnit, DEFAULT_MIN_MARKUP_PERCENT } from '@/lib/pricing'
-import { fetchSettings } from '@/lib/settings'
+import { fetchSettings, type PosLookupMode } from '@/lib/settings'
 import { buildStockByProductId, LOW_STOCK_THRESHOLD } from '@/lib/stock'
 import type { Product, ProductCategory, InventoryTransaction } from '@/lib/types'
 
 const emptyForm = {
-  name: '', sku: '', specification: '', stockUnit: 'pcs',
+  name: '', sku: '', barcode: '', specification: '', stockUnit: 'pcs',
   sellingPrice: '', costPrice: '', lowestPrice: '',
   openingStock: '', addStock: '', brand: '', categoryId: '', newCategory: '', imageUrl: '',
 }
@@ -61,6 +62,8 @@ function ProductsPageContent() {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [minMarkupPercent, setMinMarkupPercent] = useState(DEFAULT_MIN_MARKUP_PERCENT)
+  const [posLookupMode, setPosLookupMode] = useState<PosLookupMode>('catalog')
+  const showBarcodeField = barcodeSearchEnabled(posLookupMode)
 
   async function refreshCatalogFromServer() {
     setRefreshing(true)
@@ -120,7 +123,10 @@ function ProductsPageContent() {
 
   useEffect(() => {
     loadCatalog()
-    fetchSettings().then((s) => setMinMarkupPercent(s.minMarkupPercent)).catch(() => {})
+    fetchSettings().then((s) => {
+      setMinMarkupPercent(s.minMarkupPercent)
+      setPosLookupMode(s.posLookupMode)
+    }).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -295,6 +301,7 @@ function ProductsPageContent() {
       brand: getProductBrand(p),
       newCategory: '',
       imageUrl: p.imageUrl ?? '',
+      barcode: p.barcode ?? '',
     })
     setOpen(true)
   }
@@ -327,11 +334,14 @@ function ProductsPageContent() {
         return
       }
 
+      const barcodeValue = showBarcodeField ? (form.barcode.trim() || undefined) : undefined
+
       if (editingProduct) {
         const updated: Product = {
           ...editingProduct,
           name: form.name,
           sku: form.sku,
+          ...(showBarcodeField ? { barcode: barcodeValue } : {}),
           specification: form.specification || undefined,
           stockUnit: form.stockUnit || undefined,
           sellingPrice,
@@ -356,6 +366,7 @@ function ProductsPageContent() {
             category: categoryName,
             brand: updated.brand,
             imageUrl: updated.imageUrl ?? null,
+            ...(showBarcodeField ? { barcode: updated.barcode ?? null } : {}),
           }),
         })
         setProducts((prev) => prev.map((p) => p.id === updated.id ? updated : p))
@@ -386,6 +397,7 @@ function ProductsPageContent() {
           id: crypto.randomUUID(),
           name: form.name,
           sku,
+          ...(barcodeValue ? { barcode: barcodeValue } : {}),
           specification: form.specification || undefined,
           stockUnit: form.stockUnit || undefined,
           sellingPrice,
@@ -429,6 +441,7 @@ function ProductsPageContent() {
             category: categoryName,
             brand: product.brand,
             imageUrl: product.imageUrl ?? null,
+            ...(barcodeValue ? { barcode: barcodeValue } : {}),
           }),
         })
         setProducts((prev) => [product, ...prev])
@@ -493,7 +506,9 @@ function ProductsPageContent() {
       .filter((product) => !filterMissingPrices || product.costPrice <= 0 || product.sellingPrice <= 0)
       .filter((product) => isInAddedRange(product.createdAt, addedFilter))
       .filter((product) => {
-        return matchesProductSearch(product, nq, categoryMap[product.categoryId] ?? '')
+        return matchesProductSearch(product, nq, categoryMap[product.categoryId] ?? '', {
+          includeBarcode: showBarcodeField,
+        })
       })
       .map((product) => ({
         product,
@@ -520,7 +535,7 @@ function ProductsPageContent() {
     }
 
     return rows
-  }, [products, transactions, filterCategoryId, filterBrand, filterMissingPrices, addedFilter, nq, stockFilter, categoryMap])
+  }, [products, transactions, filterCategoryId, filterBrand, filterMissingPrices, addedFilter, nq, stockFilter, categoryMap, showBarcodeField])
 
   const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE))
   const paginated = visible.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
@@ -653,6 +668,22 @@ function ProductsPageContent() {
                     </p>
                   )}
                 </div>
+
+                {showBarcodeField && (
+                  <div className="space-y-1.5 order-3">
+                    <Label.Root htmlFor="p-barcode" className="text-sm font-medium text-gray-700">
+                      Barcode <span className="text-gray-400 font-normal">(EAN / UPC, optional)</span>
+                    </Label.Root>
+                    <input
+                      id="p-barcode"
+                      value={form.barcode}
+                      onChange={field('barcode')}
+                      placeholder="e.g. 6001234567890"
+                      inputMode="numeric"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-3 order-3">
                   <div className="space-y-1.5">

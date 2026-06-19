@@ -6,6 +6,7 @@ export type ImportColumnKey =
   | 'costPrice'
   | 'sellingPrice'
   | 'sku'
+  | 'barcode'
 
 /** Positional mapping for STOCK WITH PRICES.xlsx (no header row). */
 export const DEFAULT_STOCK_PRICES_MAPPING: Record<ImportColumnKey, number | null> = {
@@ -16,6 +17,7 @@ export const DEFAULT_STOCK_PRICES_MAPPING: Record<ImportColumnKey, number | null
   costPrice: 5,
   sellingPrice: 6,
   sku: null,
+  barcode: null,
 }
 
 export type RawImportRow = {
@@ -27,6 +29,7 @@ export type RawImportRow = {
   costPrice: number
   sellingPrice: number
   sku?: string
+  barcode?: string
 }
 
 export type ImportPreviewStatus = 'ok' | 'missing_price' | 'error'
@@ -36,6 +39,7 @@ export type ImportPreviewRow = {
   name: string
   specification?: string
   sku: string
+  barcode?: string
   category: string
   brand: string
   openingStock: number

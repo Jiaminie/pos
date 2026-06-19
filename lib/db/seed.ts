@@ -88,6 +88,7 @@ async function fetchCatalogFromServer(
         id: p.id,
         name: p.name,
         sku: p.sku,
+        barcode: p.barcode ?? undefined,
         specification: p.specification ?? undefined,
         stockUnit: p.stockUnit ?? undefined,
         sellingPrice: Number(p.sellingPrice),

@@ -39,6 +39,7 @@ export async function commitImportBatch(
     id: string
     name: string
     sku: string
+    barcode: string | null
     specification: string | null
     sellingPrice: number
     costPrice: number
@@ -57,6 +58,7 @@ export async function commitImportBatch(
   for (const row of validRows) {
     const data = {
       name: row.name,
+      barcode: row.barcode?.trim() || null,
       specification: row.specification ?? null,
       sellingPrice: row.sellingPrice,
       costPrice: row.costPrice,
