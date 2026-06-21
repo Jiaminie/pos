@@ -1,9 +1,12 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Building2, Check, FileText, Percent, ScanBarcode, Upload, X } from 'lucide-react'
+import { Building2, Check, FileText, GitBranch, Loader2, MapPin, Monitor, Percent, Plus, ScanBarcode, Star, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { fetchSettings, saveSettings, DEFAULT_SETTINGS, POS_LOOKUP_MODES, type PDFSettings, type PosLookupMode } from '@/lib/settings'
+import { getMyBranchId, getMyOrgId, setMyBranchId } from '@/lib/branch'
+import { getAll as getLocalBranches } from '@/lib/db/branches'
+import type { Branch } from '@/lib/types'
 
 const COLORS = [
   { label: 'Blue',   value: '#2563eb' },
@@ -15,14 +18,19 @@ const COLORS = [
   { label: 'Gray',   value: '#374151' },
 ]
 
-type SettingsTab = 'store' | 'pricing' | 'pos' | 'documents'
+type SettingsTab = 'store' | 'pricing' | 'pos' | 'documents' | 'branches' | 'device'
 
 const TABS: { id: SettingsTab; label: string; description: string; icon: typeof Building2 }[] = [
-  { id: 'store',     label: 'Store',     description: 'Name, logo & branding',     icon: Building2 },
-  { id: 'pricing',   label: 'Pricing',   description: 'POS discount rules',        icon: Percent },
-  { id: 'pos',       label: 'POS',       description: 'Checkout & product lookup', icon: ScanBarcode },
-  { id: 'documents', label: 'Documents', description: 'PDF reports & quotations', icon: FileText },
+  { id: 'store',     label: 'Store',     description: 'Name, logo & branding',        icon: Building2 },
+  { id: 'pricing',   label: 'Pricing',   description: 'POS discount rules',           icon: Percent },
+  { id: 'pos',       label: 'POS',       description: 'Checkout & product lookup',    icon: ScanBarcode },
+  { id: 'documents', label: 'Documents', description: 'PDF reports & quotations',     icon: FileText },
+  { id: 'branches',  label: 'Branches',  description: 'Create & manage branches',     icon: GitBranch },
+  { id: 'device',    label: 'Device',    description: "This device's branch assignment", icon: Monitor },
 ]
+
+type BranchForm = { name: string; code: string; address: string }
+const EMPTY_BRANCH_FORM: BranchForm = { name: '', code: '', address: '' }
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<PDFSettings>(DEFAULT_SETTINGS)
@@ -31,12 +39,88 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('store')
   const logoInputRef = useRef<HTMLInputElement>(null)
 
+  // Branches tab state
+  const [branches, setBranches]           = useState<Branch[]>([])
+  const [branchesLoading, setBranchesLoading] = useState(false)
+  const [branchForm, setBranchForm]       = useState<BranchForm>(EMPTY_BRANCH_FORM)
+  const [branchSaving, setBranchSaving]   = useState(false)
+
+  // Device tab state
+  const [deviceBranchId, setDeviceBranchId] = useState<string | null>(null)
+  const [deviceChanging, setDeviceChanging]  = useState(false)
+
   useEffect(() => {
-    fetchSettings().then((s) => {
-      setSettings(s)
-      setLoading(false)
-    })
+    fetchSettings().then((s) => { setSettings(s); setLoading(false) })
+    setDeviceBranchId(getMyBranchId())
   }, [])
+
+  useEffect(() => {
+    if (activeTab === 'branches' && branches.length === 0) loadBranches()
+    if (activeTab === 'device'   && branches.length === 0) loadBranches()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab])
+
+  async function loadBranches() {
+    setBranchesLoading(true)
+    try {
+      const local = await getLocalBranches()
+      if (local.length > 0) { setBranches(local); setBranchesLoading(false); return }
+      const orgId = getMyOrgId()
+      const url   = orgId ? `/api/branches?organizationId=${orgId}` : '/api/branches'
+      const res   = await fetch(url, { cache: 'no-store' })
+      if (res.ok) setBranches((await res.json()).data ?? [])
+    } finally {
+      setBranchesLoading(false)
+    }
+  }
+
+  async function handleCreateBranch() {
+    if (!branchForm.name.trim() || !branchForm.code.trim()) {
+      toast.error('Name and code are required')
+      return
+    }
+    const orgId = getMyOrgId()
+    if (!orgId) { toast.error('No organization found. Sync catalog first.'); return }
+    setBranchSaving(true)
+    try {
+      const res = await fetch('/api/branches', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ organizationId: orgId, ...branchForm }),
+      })
+      const { data, error } = await res.json()
+      if (!res.ok) { toast.error(error ?? 'Failed to create branch'); return }
+      setBranches((prev) => [...prev, data])
+      setBranchForm(EMPTY_BRANCH_FORM)
+      toast.success(`Branch "${data.name}" created`)
+    } finally {
+      setBranchSaving(false)
+    }
+  }
+
+  async function handleSetPrimary(branch: Branch) {
+    try {
+      const res = await fetch(`/api/branches/${branch.id}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ isPrimary: true }),
+      })
+      if (!res.ok) { toast.error('Failed to update primary branch'); return }
+      setBranches((prev) => prev.map((b) => ({ ...b, isPrimary: b.id === branch.id })))
+      toast.success(`"${branch.name}" is now the primary branch`)
+    } catch {
+      toast.error('Failed to update primary branch')
+    }
+  }
+
+  function handleDeviceBranchChange(newBranchId: string) {
+    setDeviceChanging(true)
+    setMyBranchId(newBranchId)
+    setDeviceBranchId(newBranchId)
+    const b = branches.find((b) => b.id === newBranchId)
+    toast.success(`Device reassigned to "${b?.name ?? newBranchId}"`)
+    setDeviceChanging(false)
+  }
 
   function set<K extends keyof PDFSettings>(key: K, value: PDFSettings[K]) {
     setSettings((prev) => ({ ...prev, [key]: value }))
@@ -191,18 +275,20 @@ export default function SettingsPage() {
                 Preview PDF
               </button>
             )}
-            <button
-              type="button"
-              onClick={handleSave}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium transition-colors ${
-                saved
-                  ? 'bg-green-600 text-white hover:bg-green-700'
-                  : 'bg-blue-600 text-white hover:bg-blue-700'
-              }`}
-            >
-              {saved ? <Check size={14} /> : null}
-              {saved ? 'Saved' : 'Save'}
-            </button>
+            {activeTab !== 'branches' && activeTab !== 'device' && (
+              <button
+                type="button"
+                onClick={handleSave}
+                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium transition-colors ${
+                  saved
+                    ? 'bg-green-600 text-white hover:bg-green-700'
+                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                }`}
+              >
+                {saved ? <Check size={14} /> : null}
+                {saved ? 'Saved' : 'Save'}
+              </button>
+            )}
           </div>
         </div>
 
@@ -487,6 +573,194 @@ export default function SettingsPage() {
                       </p>
                     </div>
                   </div>
+                </section>
+              </div>
+            )}
+            {activeTab === 'branches' && (
+              <div className="space-y-6">
+                <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-800">Your branches</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">Each branch has its own stock and sales records.</p>
+                  </div>
+                  {branchesLoading ? (
+                    <div className="flex items-center gap-2 text-sm text-gray-400 py-2">
+                      <Loader2 size={14} className="animate-spin" /> Loading…
+                    </div>
+                  ) : branches.length === 0 ? (
+                    <p className="text-sm text-gray-400">No branches yet. Create one below.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {branches.map((branch) => (
+                        <div key={branch.id} className="flex items-start justify-between gap-3 border border-gray-100 rounded-xl px-4 py-3 bg-gray-50">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-sm font-medium text-gray-900">{branch.name}</span>
+                              <span className="text-[10px] font-mono bg-white border border-gray-200 text-gray-600 px-1.5 py-0.5 rounded">
+                                {branch.code}
+                              </span>
+                              {branch.isPrimary && (
+                                <span className="flex items-center gap-0.5 text-[10px] text-amber-600 font-medium">
+                                  <Star size={10} className="fill-amber-400 text-amber-400" />
+                                  Primary
+                                </span>
+                              )}
+                            </div>
+                            {branch.address && (
+                              <p className="flex items-center gap-1 text-xs text-gray-500 mt-0.5">
+                                <MapPin size={10} />
+                                {branch.address}
+                              </p>
+                            )}
+                          </div>
+                          {!branch.isPrimary && (
+                            <button
+                              type="button"
+                              onClick={() => handleSetPrimary(branch)}
+                              className="shrink-0 text-xs text-blue-600 hover:underline"
+                            >
+                              Set primary
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-800">Add a branch</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">Code is short and unique per organisation (e.g. CBD, WL, MSA).</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="block text-xs font-medium text-gray-700">Name</label>
+                      <input
+                        type="text"
+                        value={branchForm.name}
+                        onChange={(e) => setBranchForm((f) => ({ ...f, name: e.target.value }))}
+                        placeholder="Westlands Branch"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-xs font-medium text-gray-700">Code</label>
+                      <input
+                        type="text"
+                        value={branchForm.code}
+                        onChange={(e) => setBranchForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))}
+                        placeholder="WL"
+                        maxLength={8}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-xs font-medium text-gray-700">
+                      Address <span className="text-gray-400 font-normal">(optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={branchForm.address}
+                      onChange={(e) => setBranchForm((f) => ({ ...f, address: e.target.value }))}
+                      placeholder="Sarit Centre, Westlands, Nairobi"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCreateBranch}
+                    disabled={branchSaving}
+                    className="flex items-center gap-1.5 bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors disabled:opacity-60"
+                  >
+                    {branchSaving ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+                    {branchSaving ? 'Creating…' : 'Create branch'}
+                  </button>
+                </section>
+              </div>
+            )}
+
+            {activeTab === 'device' && (
+              <div className="space-y-6">
+                {!deviceBranchId && (
+                  <section className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                    <p className="text-sm font-medium text-amber-800">No branch assigned</p>
+                    <p className="text-xs text-amber-700 mt-0.5">
+                      Select a branch below. POS and stock will not work correctly until this is done.
+                    </p>
+                  </section>
+                )}
+
+                <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-800">This device's branch</h3>
+                    <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
+                      Every sale, restock, and transfer on this device is recorded against this branch.
+                      Changing it takes effect immediately.
+                    </p>
+                  </div>
+
+                  {branchesLoading ? (
+                    <div className="flex items-center gap-2 text-sm text-gray-400">
+                      <Loader2 size={14} className="animate-spin" /> Loading branches…
+                    </div>
+                  ) : branches.length === 0 ? (
+                    <p className="text-sm text-gray-400">
+                      No branches found. Go to the Branches tab to create one first.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {branches.map((branch) => {
+                        const selected = branch.id === deviceBranchId
+                        return (
+                          <button
+                            key={branch.id}
+                            type="button"
+                            disabled={deviceChanging}
+                            onClick={() => handleDeviceBranchChange(branch.id)}
+                            className={`w-full text-left rounded-xl border px-4 py-3 transition-colors flex items-center justify-between gap-2 ${
+                              selected
+                                ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500'
+                                : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                            }`}
+                          >
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <span className={`text-sm font-medium ${selected ? 'text-blue-800' : 'text-gray-800'}`}>
+                                  {branch.name}
+                                </span>
+                                <span className="text-[10px] font-mono bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
+                                  {branch.code}
+                                </span>
+                                {branch.isPrimary && (
+                                  <span className="flex items-center gap-0.5 text-[10px] text-amber-600 font-medium">
+                                    <Star size={10} className="fill-amber-400 text-amber-400" />
+                                    Primary
+                                  </span>
+                                )}
+                              </div>
+                              {branch.address && (
+                                <p className="flex items-center gap-1 text-xs text-gray-500 mt-0.5">
+                                  <MapPin size={10} />
+                                  {branch.address}
+                                </p>
+                              )}
+                            </div>
+                            {selected && <Check size={16} className="text-blue-600 shrink-0" />}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </section>
+
+                <section className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3">
+                  <p className="text-xs text-gray-500">
+                    <span className="font-medium text-gray-700">Note:</span> Each device (phone, tablet, PC) must be
+                    assigned to one branch. Reassigning mid-day is not recommended as it will split the day's
+                    transactions across two branches in reports.
+                  </p>
                 </section>
               </div>
             )}

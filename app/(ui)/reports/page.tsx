@@ -16,6 +16,7 @@ import { getBrandOptions, getProductBrand, matchesProductSearch } from '@/lib/br
 import { barcodeSearchEnabled } from '@/lib/product-search'
 import { normalizeQuery } from '@/lib/normalize'
 import { fetchSettings, type PosLookupMode } from '@/lib/settings'
+import { getMyBranchId } from '@/lib/branch'
 import { INCIDENT_REASON_LABELS } from '@/lib/types'
 import type { InventoryTransaction, Product, ProductCategory, Incident } from '@/lib/types'
 
@@ -137,7 +138,9 @@ export default function ReportsPage() {
   const [page, setPage] = useState(1)
   const [lowStockOpen, setLowStockOpen] = useState(false)
   const [missedOpen, setMissedOpen] = useState(false)
+  const [abcOpen, setAbcOpen] = useState(true)
   const [posLookupMode, setPosLookupMode] = useState<PosLookupMode>('catalog')
+  const myBranchId = getMyBranchId()
   const PAGE_SIZE = 25
   const LOW_STOCK_PREVIEW = 10
 
@@ -197,13 +200,32 @@ export default function ReportsPage() {
     return counts
   }, [products])
   const stockByProductId = useMemo(
-    () => buildStockByProductId(products, transactions),
-    [products, transactions],
+    () => buildStockByProductId(products, transactions, myBranchId ?? undefined),
+    [products, transactions, myBranchId],
   )
+
+  // Scope all transaction lookups to this branch (pre-migration txs without branchId count for all)
+  const branchTransactions = useMemo(
+    () => myBranchId
+      ? transactions.filter((tx) => !tx.branchId || tx.branchId === myBranchId)
+      : transactions,
+    [transactions, myBranchId],
+  )
+
+  // Most recent SALE date per product (across ALL time, for "days since last sale")
+  const lastSaleDate = useMemo(() => {
+    const map: Record<string, Date> = {}
+    for (const tx of branchTransactions) {
+      if (tx.type !== 'SALE') continue
+      const d = new Date(tx.createdAt)
+      if (!map[tx.productId] || d > map[tx.productId]) map[tx.productId] = d
+    }
+    return map
+  }, [branchTransactions])
 
   const { start, end } = getRangeBounds(range, customFrom, customTo)
   const rangeLabel = getRangeLabel(range, customFrom, customTo)
-  const filtered = transactions.filter((tx) => inRange(tx.createdAt, start, end))
+  const filtered = branchTransactions.filter((tx) => inRange(tx.createdAt, start, end))
   const customRangeInvalid = range === 'custom' && customFrom && customTo && customFrom > customTo
 
   const sales     = filtered.filter((t) => t.type === 'SALE')
@@ -248,6 +270,72 @@ export default function ReportsPage() {
 
   const soldRowCount    = allRows.filter((r) => r.sold > 0).length
   const stockedRowCount = allRows.filter((r) => r.isStockOnly).length
+
+  // ── ABC Analysis ────────────────────────────────────────────────────────────
+  // A = top 70% of revenue (fast movers)
+  // B = next 20%, cumulative 70–90% (medium movers)
+  // C = bottom 10% + zero-sales products (slow movers)
+  const abcAnalysis = useMemo(() => {
+    const totalRev = allRows.reduce((s, r) => s + r.revenue, 0)
+
+    // Only products with actual sales in the selected range participate in ranking
+    const withSales = [...allRows]
+      .filter((r) => r.sold > 0)
+      .sort((a, b) => b.revenue - a.revenue)
+
+    type ABCRow = ReportRow & { abcClass: 'A' | 'B' | 'C'; revenueShare: number }
+    let cumulative = 0
+    const classified: ABCRow[] = withSales.map((row) => {
+      cumulative += row.revenue
+      const pct = totalRev > 0 ? cumulative / totalRev : 1
+      return {
+        ...row,
+        abcClass:     pct <= 0.7 ? 'A' : pct <= 0.9 ? 'B' : 'C',
+        revenueShare: totalRev > 0 ? row.revenue / totalRev : 0,
+      }
+    })
+
+    const aItems = classified.filter((r) => r.abcClass === 'A')
+    const bItems = classified.filter((r) => r.abcClass === 'B')
+    const cItems = classified.filter((r) => r.abcClass === 'C')
+
+    // Zero-sales products in the range are always C
+    const activePids = new Set(allRows.filter((r) => r.sold > 0).map((r) => r.productId))
+    const zeroSaleProducts: ABCRow[] = products
+      .filter((p) => !activePids.has(p.id))
+      .map((p) => ({
+        productId:     p.id,
+        name:          p.name,
+        sku:           p.sku,
+        specification: p.specification,
+        stockUnit:     p.stockUnit,
+        category:      categoryMap[p.categoryId] ?? '—',
+        sold:          0,
+        stocked:       0,
+        listRevenue:   0,
+        revenue:       0,
+        netStock:      stockByProductId[p.id] ?? (p.initialStock ?? 0),
+        isStockOnly:   false,
+        abcClass:      'C' as const,
+        revenueShare:  0,
+      }))
+
+    const aRevShare = totalRev > 0 ? aItems.reduce((s, r) => s + r.revenue, 0) / totalRev : 0
+    const bRevShare = totalRev > 0 ? bItems.reduce((s, r) => s + r.revenue, 0) / totalRev : 0
+    const cRevShare = totalRev > 0 ? cItems.reduce((s, r) => s + r.revenue, 0) / totalRev : 0
+
+    return { aItems, bItems, cItems, zeroSaleProducts, aRevShare, bRevShare, cRevShare, totalRev }
+  }, [allRows, products, categoryMap, stockByProductId])
+
+  function daysSince(productId: string): string {
+    const last = lastSaleDate[productId]
+    if (!last) return 'Never sold'
+    const days = Math.floor((Date.now() - last.getTime()) / 86_400_000)
+    if (days === 0) return 'Today'
+    if (days === 1) return '1 day ago'
+    return `${days} days ago`
+  }
+  // ────────────────────────────────────────────────────────────────────────────
 
   // Apply search + category filter
   const nq = normalizeQuery(search.trim())
@@ -597,6 +685,80 @@ export default function ReportsPage() {
         </div>
       )}
 
+      {/* ABC Movement Analysis */}
+      {!loading && allRows.some((r) => r.sold > 0) && (
+        <div className="mb-4 border border-gray-200 rounded-xl overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setAbcOpen((o) => !o)}
+            className="w-full flex items-center gap-2 px-4 py-3 text-left bg-white hover:bg-gray-50 transition-colors"
+          >
+            <ChevronDown size={16} className={`text-gray-500 shrink-0 transition-transform ${abcOpen ? 'rotate-180' : ''}`} />
+            <span className="text-sm font-semibold text-gray-800 flex-1">Stock movement analysis</span>
+            <span className="text-xs text-gray-400 shrink-0">ABC · {rangeLabel}</span>
+          </button>
+
+          {abcOpen && (
+            <div className="border-t border-gray-100">
+              {/* Legend */}
+              <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 flex flex-wrap gap-4 text-xs text-gray-500">
+                <span><span className="font-bold text-green-700">A</span> = top 70% of revenue · fast movers</span>
+                <span><span className="font-bold text-blue-700">B</span> = next 20% · medium movers</span>
+                <span><span className="font-bold text-amber-700">C</span> = bottom 10% + zero sales · slow movers</span>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-gray-100">
+
+                {/* ── A: Fast movers ── */}
+                <ABCColumn
+                  label="Fast movers"
+                  badge="A"
+                  badgeClass="bg-green-100 text-green-800"
+                  headerClass="bg-green-50"
+                  count={abcAnalysis.aItems.length}
+                  revenueShare={abcAnalysis.aRevShare}
+                  totalRev={abcAnalysis.totalRev}
+                  items={abcAnalysis.aItems.slice(0, 10)}
+                  showDaysSince={false}
+                  daysSince={daysSince}
+                  categoryMap={categoryMap}
+                />
+
+                {/* ── B: Medium movers ── */}
+                <ABCColumn
+                  label="Medium movers"
+                  badge="B"
+                  badgeClass="bg-blue-100 text-blue-800"
+                  headerClass="bg-blue-50"
+                  count={abcAnalysis.bItems.length}
+                  revenueShare={abcAnalysis.bRevShare}
+                  totalRev={abcAnalysis.totalRev}
+                  items={abcAnalysis.bItems.slice(0, 10)}
+                  showDaysSince={false}
+                  daysSince={daysSince}
+                  categoryMap={categoryMap}
+                />
+
+                {/* ── C: Slow movers ── */}
+                <ABCColumn
+                  label="Slow movers"
+                  badge="C"
+                  badgeClass="bg-amber-100 text-amber-800"
+                  headerClass="bg-amber-50"
+                  count={abcAnalysis.cItems.length + abcAnalysis.zeroSaleProducts.length}
+                  revenueShare={abcAnalysis.cRevShare}
+                  totalRev={abcAnalysis.totalRev}
+                  items={[...abcAnalysis.cItems, ...abcAnalysis.zeroSaleProducts].slice(0, 15)}
+                  showDaysSince={true}
+                  daysSince={daysSince}
+                  categoryMap={categoryMap}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <div className="flex flex-wrap gap-1">
           {([
@@ -781,6 +943,103 @@ export default function ReportsPage() {
         </div>
       )}
     </div>
+    </div>
+  )
+}
+
+// ── ABCColumn ────────────────────────────────────────────────────────────────
+interface ABCColumnProps {
+  label: string
+  badge: string
+  badgeClass: string
+  headerClass: string
+  count: number
+  revenueShare: number
+  totalRev: number
+  items: Array<{
+    productId: string; name: string; sku: string
+    sold: number; revenue: number; netStock: number; stockUnit?: string
+  }>
+  showDaysSince: boolean
+  daysSince: (productId: string) => string
+  categoryMap: Record<string, string>
+}
+
+function ABCColumn({
+  label, badge, badgeClass, headerClass,
+  count, revenueShare, totalRev,
+  items, showDaysSince, daysSince,
+}: ABCColumnProps) {
+  const [expanded, setExpanded] = useState(false)
+  const visible = expanded ? items : items.slice(0, 5)
+
+  return (
+    <div className="flex flex-col">
+      {/* Column header */}
+      <div className={`px-4 py-3 ${headerClass} flex items-center gap-2`}>
+        <span className={`text-sm font-bold px-2 py-0.5 rounded-md ${badgeClass}`}>{badge}</span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-gray-800">{label}</p>
+          <p className="text-xs text-gray-500">
+            {count} product{count !== 1 ? 's' : ''}
+            {revenueShare > 0 && (
+              <> · <span className="font-medium">{Math.round(revenueShare * 100)}%</span> of revenue
+                {' '}(KSh {Math.round(totalRev * revenueShare).toLocaleString()})
+              </>
+            )}
+          </p>
+        </div>
+      </div>
+
+      {/* Product rows */}
+      <div className="flex-1 divide-y divide-gray-50">
+        {items.length === 0 ? (
+          <p className="px-4 py-4 text-xs text-gray-400 italic">No products in this category for the selected period.</p>
+        ) : (
+          <>
+            {visible.map((item) => (
+              <div key={item.productId} className="px-4 py-2.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-gray-800 truncate">{item.name}</p>
+                    <p className="text-[10px] text-gray-400 font-mono">{item.sku}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    {item.sold > 0 ? (
+                      <>
+                        <p className="text-xs font-semibold text-gray-700">KSh {item.revenue.toLocaleString()}</p>
+                        <p className="text-[10px] text-gray-400">{item.sold}{item.stockUnit ? ` ${item.stockUnit}` : ''} sold</p>
+                      </>
+                    ) : (
+                      <p className="text-[10px] text-gray-400">No sales</p>
+                    )}
+                  </div>
+                </div>
+                {showDaysSince && (
+                  <p className={`text-[10px] mt-0.5 font-medium ${
+                    daysSince(item.productId) === 'Never sold'
+                      ? 'text-red-500'
+                      : daysSince(item.productId) === 'Today'
+                        ? 'text-green-600'
+                        : 'text-amber-600'
+                  }`}>
+                    Last sale: {daysSince(item.productId)}
+                  </p>
+                )}
+              </div>
+            ))}
+            {items.length > 5 && (
+              <button
+                type="button"
+                onClick={() => setExpanded((e) => !e)}
+                className="w-full px-4 py-2 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 transition-colors text-left"
+              >
+                {expanded ? 'Show less' : `+ ${items.length - 5} more`}
+              </button>
+            )}
+          </>
+        )}
+      </div>
     </div>
   )
 }

@@ -3,7 +3,7 @@
 // Never unconditionally drop stores — that wipes user data.
 
 const DB_NAME = 'pos'
-const DB_VERSION = 6
+const DB_VERSION = 8
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
@@ -18,9 +18,8 @@ export function openDb(): Promise<IDBDatabase> {
       const oldVersion = event.oldVersion
 
       // v1→v3: initial schema or early versions — safe to recreate core stores
-      // (these installs never had real user data)
       if (oldVersion < 3) {
-        if (db.objectStoreNames.contains('products')) db.deleteObjectStore('products')
+        if (db.objectStoreNames.contains('products'))   db.deleteObjectStore('products')
         if (db.objectStoreNames.contains('categories')) db.deleteObjectStore('categories')
       }
 
@@ -64,10 +63,43 @@ export function openDb(): Promise<IDBDatabase> {
           prodStore.createIndex('brand', 'brand')
         }
       }
+
+      // v7: units lookup table
+      if (!db.objectStoreNames.contains('units')) {
+        const unitStore = db.createObjectStore('units', { keyPath: 'id' })
+        unitStore.createIndex('code', 'code', { unique: true })
+      }
+
+      // v8: organizations, branches, transfers
+      if (!db.objectStoreNames.contains('organizations')) {
+        db.createObjectStore('organizations', { keyPath: 'id' })
+      }
+
+      if (!db.objectStoreNames.contains('branches')) {
+        const branchStore = db.createObjectStore('branches', { keyPath: 'id' })
+        branchStore.createIndex('organizationId', 'organizationId')
+        branchStore.createIndex('code', 'code')
+      }
+
+      if (!db.objectStoreNames.contains('transfers')) {
+        const txStore = db.createObjectStore('transfers', { keyPath: 'id' })
+        txStore.createIndex('fromBranchId', 'fromBranchId')
+        txStore.createIndex('toBranchId',   'toBranchId')
+        txStore.createIndex('status',       'status')
+        txStore.createIndex('createdAt',    'createdAt')
+      }
+
+      // v8: branchId index on transactions (add to existing store)
+      if (oldVersion < 8 && db.objectStoreNames.contains('transactions')) {
+        const txStore = (event.target as IDBOpenDBRequest).transaction!.objectStore('transactions')
+        if (!txStore.indexNames.contains('branchId')) {
+          txStore.createIndex('branchId', 'branchId')
+        }
+      }
     }
 
     request.onsuccess = (event) => resolve((event.target as IDBOpenDBRequest).result)
-    request.onerror = (event) => reject((event.target as IDBOpenDBRequest).error)
+    request.onerror  = (event) => reject((event.target as IDBOpenDBRequest).error)
   })
 
   return dbPromise

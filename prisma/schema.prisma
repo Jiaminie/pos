@@ -6,26 +6,105 @@ datasource db {
   provider = "postgresql"
 }
 
-model Product {
-  id            String   @id @default(uuid())
-  name          String
-  specification String?
-  stockUnit     String?  @map("stock_unit")
-  barcode       String?  @unique
-  sku           String   @unique
-  sellingPrice  Decimal  @map("selling_price")
-  costPrice     Decimal  @map("cost_price")
-  lowestPrice   Decimal? @map("lowest_price")
-  imageUrl      String?  @map("image_url")
-  category      String?
-  brand         String   @default("UNBRANDED")
-  quantity      String?
-  createdAt     DateTime @default(now()) @map("created_at")
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  country   String   @default("KE")
+  createdAt DateTime @default(now()) @map("created_at")
 
+  branches Branch[]
+  products Product[]
+  settings StoreSettings?
+
+  @@map("organizations")
+}
+
+model Branch {
+  id             String   @id @default(uuid())
+  organizationId String   @map("organization_id")
+  name           String
+  code           String
+  isPrimary      Boolean  @default(false) @map("is_primary")
+  address        String?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization  Organization           @relation(fields: [organizationId], references: [id])
+  transactions  InventoryTransaction[]
+  devices       Device[]
+  transfersFrom StockTransfer[]        @relation("TransferFrom")
+  transfersTo   StockTransfer[]        @relation("TransferTo")
+
+  @@unique([organizationId, code])
+  @@map("branches")
+}
+
+enum TransferStatus {
+  PENDING
+  IN_TRANSIT
+  RECEIVED
+  REJECTED
+  REVERSED
+}
+
+model StockTransfer {
+  id           String         @id @default(uuid())
+  fromBranchId String         @map("from_branch_id")
+  toBranchId   String         @map("to_branch_id")
+  productId    String         @map("product_id")
+  quantity     Decimal
+  status       TransferStatus @default(PENDING)
+  note         String?
+  fromDeviceId String         @map("from_device_id")
+  toDeviceId   String?        @map("to_device_id")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  receivedAt   DateTime?      @map("received_at")
+
+  fromBranch Branch  @relation("TransferFrom", fields: [fromBranchId], references: [id])
+  toBranch   Branch  @relation("TransferTo", fields: [toBranchId], references: [id])
+  product    Product @relation(fields: [productId], references: [id])
+
+  @@map("stock_transfers")
+}
+
+model Unit {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  isCustom  Boolean  @default(false) @map("is_custom")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  products Product[]
+
+  @@map("units")
+}
+
+model Product {
+  id             String  @id @default(uuid())
+  name           String
+  specification  String?
+  stockUnit      String? @map("stock_unit")
+  unitId         String? @map("unit_id")
+  barcode        String? @unique
+  sku            String  @unique
+  sellingPrice   Decimal @map("selling_price")
+  costPrice      Decimal @map("cost_price")
+  lowestPrice    Decimal? @map("lowest_price")
+  imageUrl       String? @map("image_url")
+  category       String?
+  brand          String  @default("UNBRANDED")
+  quantity       String?
+  organizationId String? @map("organization_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  unit         Unit?                  @relation(fields: [unitId], references: [id])
+  organization Organization?          @relation(fields: [organizationId], references: [id])
   transactions InventoryTransaction[]
   incidents    Incident[]
+  transfers    StockTransfer[]
 
   @@index([brand])
+  @@index([unitId])
+  @@index([organizationId])
   @@map("products")
 }
 
@@ -34,27 +113,42 @@ enum TransactionType {
   PURCHASE
   ADJUSTMENT
   RETURN
+  TRANSFER_OUT
+}
+
+enum TransactionSource {
+  SUPPLIER
+  INTERBRANCH
+  CORRECTION
 }
 
 model InventoryTransaction {
-  id        String          @id @default(uuid())
-  productId String          @map("product_id")
-  type      TransactionType
-  quantity  Int
-  unitPrice Decimal?        @map("unit_price")
-  deviceId  String          @map("device_id")
-  createdAt DateTime        @default(now()) @map("created_at")
-  syncedAt  DateTime?       @map("synced_at")
+  id             String             @id @default(uuid())
+  productId      String             @map("product_id")
+  type           TransactionType
+  source         TransactionSource? @map("source")
+  sourceBranchId String?            @map("source_branch_id")
+  branchId       String?            @map("branch_id")
+  quantity       Decimal
+  unitPrice      Decimal?           @map("unit_price")
+  deviceId       String             @map("device_id")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  syncedAt       DateTime?          @map("synced_at")
 
   product Product @relation(fields: [productId], references: [id])
+  branch  Branch? @relation(fields: [branchId], references: [id])
 
+  @@index([branchId])
   @@map("inventory_transactions")
 }
 
 model Device {
   id         String    @id
   name       String
+  branchId   String?   @map("branch_id")
   lastSyncAt DateTime? @map("last_sync_at")
+
+  branch Branch? @relation(fields: [branchId], references: [id])
 
   @@map("devices")
 }
@@ -82,16 +176,19 @@ model Incident {
 }
 
 model StoreSettings {
-  id           String  @id @default("singleton")
-  companyName  String  @default("My Business") @map("company_name")
-  tagline      String  @default("")
-  logoDataUrl  String  @default("") @map("logo_data_url")
-  primaryColor String  @default("#2563eb") @map("primary_color")
-  currency     String  @default("KES")
-  footerText        String   @default("Thank you for your business.") @map("footer_text")
-  minMarkupPercent  Decimal  @default(150) @map("min_markup_percent")
-  posLookupMode     String   @default("catalog") @map("pos_lookup_mode")
-  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at")
+  id               String   @id @default("singleton")
+  companyName      String   @default("My Business") @map("company_name")
+  tagline          String   @default("")
+  logoDataUrl      String   @default("") @map("logo_data_url")
+  primaryColor     String   @default("#2563eb") @map("primary_color")
+  currency         String   @default("KES")
+  footerText       String   @default("Thank you for your business.") @map("footer_text")
+  minMarkupPercent Decimal  @default(150) @map("min_markup_percent")
+  posLookupMode    String   @default("catalog") @map("pos_lookup_mode")
+  organizationId   String?  @unique @map("organization_id")
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
 
   @@map("store_settings")
 }

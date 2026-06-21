@@ -8,7 +8,15 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { name, sku, barcode, sellingPrice, costPrice, lowestPrice, category, brand, specification, stockUnit, imageUrl } = body;
+    const { name, sku, barcode, sellingPrice, costPrice, lowestPrice, category, brand, specification, stockUnit, imageUrl, unitId } = body;
+
+    // unitId is immutable after creation — reject attempts to change it
+    if (unitId !== undefined) {
+      return Response.json(
+        { data: null, error: 'unitId cannot be changed after product creation' },
+        { status: 400 },
+      );
+    }
 
     const product = await prisma.product.update({
       where: { id },
@@ -25,6 +33,7 @@ export async function PATCH(
         ...(stockUnit !== undefined && { stockUnit }),
         ...(imageUrl !== undefined && { imageUrl }),
       },
+      include: { unit: true },
     });
 
     return Response.json({ data: product, error: null });

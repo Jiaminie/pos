@@ -14,6 +14,7 @@ import { ProductImageField } from '@/components/products/ProductImageField'
 import { toast } from 'sonner'
 import { getAll as getProducts, upsertMany } from '@/lib/db/products'
 import { getAll as getCategories, upsertMany as upsertCategories } from '@/lib/db/categories'
+import { getAll as getUnits, upsertMany as upsertUnitsLocal } from '@/lib/db/units'
 import { createMany as createManyTx, getAll as getTransactions } from '@/lib/db/transactions'
 import { pushMany as pushManyTx, drain } from '@/lib/db/syncQueue'
 import { replaceCatalogFromServer, seedIfEmpty, syncFromServer } from '@/lib/db/seed'
@@ -26,12 +27,14 @@ import { barcodeSearchEnabled } from '@/lib/product-search'
 import { effectiveLowestPrice, maxDiscountPerUnit, DEFAULT_MIN_MARKUP_PERCENT } from '@/lib/pricing'
 import { fetchSettings, type PosLookupMode } from '@/lib/settings'
 import { buildStockByProductId, LOW_STOCK_THRESHOLD } from '@/lib/stock'
-import type { Product, ProductCategory, InventoryTransaction } from '@/lib/types'
+import type { Product, ProductCategory, InventoryTransaction, Unit, TransactionSource } from '@/lib/types'
 
 const emptyForm = {
-  name: '', sku: '', barcode: '', specification: '', stockUnit: 'pcs',
+  name: '', sku: '', barcode: '', specification: '',
+  unitId: '', newUnitCode: '', newUnitName: '',
   sellingPrice: '', costPrice: '', lowestPrice: '',
-  openingStock: '', addStock: '', brand: '', categoryId: '', newCategory: '', imageUrl: '',
+  openingStock: '', addStock: '', restockSource: 'SUPPLIER' as TransactionSource,
+  brand: '', categoryId: '', newCategory: '', imageUrl: '',
 }
 const PAGE_SIZE = 20
 
@@ -39,6 +42,7 @@ function ProductsPageContent() {
   const searchParams = useSearchParams()
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<ProductCategory[]>([])
+  const [units, setUnits] = useState<Unit[]>([])
   const [transactions, setTransactions] = useState<InventoryTransaction[]>([])
   const [open, setOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
@@ -84,19 +88,20 @@ function ProductsPageContent() {
   }
 
   async function loadCatalog(runSync = true) {
-    let [cats, prods, txs] = await Promise.all([getCategories(), getProducts(), getTransactions()])
+    let [cats, prods, unitList, txs] = await Promise.all([getCategories(), getProducts(), getUnits(), getTransactions()])
     if (prods.length === 0) {
       await seedIfEmpty()
-      ;[cats, prods, txs] = await Promise.all([getCategories(), getProducts(), getTransactions()])
+      ;[cats, prods, unitList, txs] = await Promise.all([getCategories(), getProducts(), getUnits(), getTransactions()])
       if (prods.length === 0) {
         const sync = await replaceCatalogFromServer()
         if (sync.ok) {
-          ;[cats, prods, txs] = await Promise.all([getCategories(), getProducts(), getTransactions()])
+          ;[cats, prods, unitList, txs] = await Promise.all([getCategories(), getProducts(), getUnits(), getTransactions()])
         }
       }
     }
     setCategories(cats)
     setProducts(prods)
+    setUnits(unitList)
     setTransactions(txs)
 
     if (!runSync) return
@@ -104,9 +109,10 @@ function ProductsPageContent() {
     // Keep screen responsive: sync in background and only refresh when changed.
     void syncFromServer().then(async (synced) => {
       if (!synced) return
-      const [nextCats, nextProds, nextTxs] = await Promise.all([getCategories(), getProducts(), getTransactions()])
+      const [nextCats, nextProds, nextUnitList, nextTxs] = await Promise.all([getCategories(), getProducts(), getUnits(), getTransactions()])
       setCategories(nextCats)
       setProducts(nextProds)
+      setUnits(nextUnitList)
       setTransactions(nextTxs)
     })
   }
@@ -161,19 +167,22 @@ function ProductsPageContent() {
     })
   }, [searchParams, products])
 
-  async function handleRestock(product: Product) {
-    const q = parseInt(restockQtys[product.id] ?? '', 10)
-    if (!q || q < 1) {
+  async function handleRestock(product: Product, source: TransactionSource = 'SUPPLIER') {
+    const qRaw = restockQtys[product.id] ?? ''
+    const q = parseFloat(qRaw)
+    if (!q || q <= 0) {
       toast.error('Enter a valid quantity')
       return
     }
     setRestocking((r) => ({ ...r, [product.id]: true }))
     try {
+      const unitLabel = units.find((u) => u.id === product.unitId)?.code ?? product.stockUnit ?? 'units'
       const tx: InventoryTransaction = {
         id: crypto.randomUUID(),
         type: 'STOCK_IN',
         productId: product.id,
         quantity: q,
+        source,
         createdAt: new Date().toISOString(),
       }
       await createManyTx([tx])
@@ -182,7 +191,7 @@ function ProductsPageContent() {
       setTransactions((prev) => [tx, ...prev])
       setRestockQtys((r) => ({ ...r, [product.id]: '' }))
       toast.success(`Restocked — ${product.name}`, {
-        description: `+${q} ${product.stockUnit ?? 'units'} added`,
+        description: `+${q} ${unitLabel} added`,
       })
     } finally {
       setRestocking((r) => ({ ...r, [product.id]: false }))
@@ -291,12 +300,16 @@ function ProductsPageContent() {
       name: p.name,
       sku: p.sku,
       specification: p.specification ?? '',
-      stockUnit: p.stockUnit ?? 'pcs',
+      // unitId is read-only on edit — shown but not editable
+      unitId: p.unitId ?? '',
+      newUnitCode: '',
+      newUnitName: '',
       sellingPrice: String(p.sellingPrice),
       costPrice: String(p.costPrice),
       lowestPrice: p.lowestPrice != null ? String(p.lowestPrice) : '',
       openingStock: '',
       addStock: '',
+      restockSource: 'SUPPLIER',
       categoryId: p.categoryId ?? '',
       brand: getProductBrand(p),
       newCategory: '',
@@ -336,6 +349,26 @@ function ProductsPageContent() {
 
       const barcodeValue = showBarcodeField ? (form.barcode.trim() || undefined) : undefined
 
+      // Resolve unit — may need to create a custom one first
+      let resolvedUnitId: string | undefined = form.unitId || undefined
+      if (!resolvedUnitId && form.newUnitCode.trim() && form.newUnitName.trim()) {
+        const unitRes = await fetch('/api/units', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: form.newUnitCode.trim(), name: form.newUnitName.trim() }),
+        })
+        const unitJson = await unitRes.json().catch(() => ({}))
+        if (unitRes.ok && unitJson.data?.id) {
+          const newUnit: Unit = unitJson.data
+          resolvedUnitId = newUnit.id
+          await upsertUnitsLocal([newUnit])
+          setUnits((prev) => [...prev, newUnit])
+        } else {
+          toast.error(unitJson.error ?? 'Could not create unit')
+          return
+        }
+      }
+
       if (editingProduct) {
         const updated: Product = {
           ...editingProduct,
@@ -343,7 +376,7 @@ function ProductsPageContent() {
           sku: form.sku,
           ...(showBarcodeField ? { barcode: barcodeValue } : {}),
           specification: form.specification || undefined,
-          stockUnit: form.stockUnit || undefined,
+          // unitId intentionally NOT updated — immutable after creation
           sellingPrice,
           costPrice,
           lowestPrice,
@@ -359,7 +392,6 @@ function ProductsPageContent() {
             name: updated.name,
             sku: updated.sku,
             specification: updated.specification ?? null,
-            stockUnit: updated.stockUnit ?? null,
             sellingPrice: updated.sellingPrice,
             costPrice: updated.costPrice,
             lowestPrice: updated.lowestPrice ?? null,
@@ -372,20 +404,22 @@ function ProductsPageContent() {
         setProducts((prev) => prev.map((p) => p.id === updated.id ? updated : p))
 
         // Restock if requested
-        const addQty = parseInt(form.addStock, 10)
+        const addQty = parseFloat(form.addStock)
         if (addQty > 0) {
+          const unitLabel = units.find((u) => u.id === updated.unitId)?.code ?? updated.stockUnit ?? 'units'
           const tx: InventoryTransaction = {
             id: crypto.randomUUID(),
             type: 'STOCK_IN',
             productId: updated.id,
             quantity: addQty,
+            source: form.restockSource,
             createdAt: new Date().toISOString(),
           }
           await createManyTx([tx])
           await pushManyTx([tx])
           drain().catch(() => {})
           setTransactions((prev) => [tx, ...prev])
-          toast.success(`Product updated — +${addQty} ${updated.stockUnit ?? 'units'} added to stock`)
+          toast.success(`Product updated — +${addQty} ${unitLabel} added to stock`)
         } else {
           toast.success('Product updated')
         }
@@ -399,7 +433,7 @@ function ProductsPageContent() {
           sku,
           ...(barcodeValue ? { barcode: barcodeValue } : {}),
           specification: form.specification || undefined,
-          stockUnit: form.stockUnit || undefined,
+          unitId: resolvedUnitId,
           sellingPrice,
           costPrice,
           lowestPrice,
@@ -410,14 +444,15 @@ function ProductsPageContent() {
         }
         await upsertMany([product])
 
-        // Record opening stock as a STOCK_IN transaction
-        const openingQty = parseInt(form.openingStock, 10)
+        // Record opening stock as a STOCK_IN transaction (source: SUPPLIER)
+        const openingQty = parseFloat(form.openingStock)
         if (openingQty > 0) {
           const tx: InventoryTransaction = {
             id: crypto.randomUUID(),
             type: 'STOCK_IN',
             productId: product.id,
             quantity: openingQty,
+            source: 'SUPPLIER',
             createdAt: new Date().toISOString(),
           }
           await createManyTx([tx])
@@ -434,7 +469,7 @@ function ProductsPageContent() {
             name: product.name,
             sku: product.sku,
             specification: product.specification ?? null,
-            stockUnit: product.stockUnit ?? null,
+            unitId: product.unitId ?? null,
             sellingPrice: product.sellingPrice,
             costPrice: product.costPrice,
             lowestPrice: product.lowestPrice ?? null,
@@ -693,12 +728,57 @@ function ProductsPageContent() {
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div className="space-y-1.5">
-                    <Label.Root htmlFor="p-unit" className="text-sm font-medium text-gray-700">Stock Unit</Label.Root>
-                    <input id="p-unit" value={form.stockUnit} onChange={field('stockUnit')}
-                      placeholder="e.g. pcs, box, pkt, roll"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <Label.Root htmlFor="p-unit" className="text-sm font-medium text-gray-700">
+                      Stock Unit {!editingProduct && <span className="text-red-500">*</span>}
+                    </Label.Root>
+                    {editingProduct ? (
+                      <div className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-600">
+                        <span>{units.find((u) => u.id === editingProduct.unitId)?.code ?? editingProduct.stockUnit ?? '—'}</span>
+                        <span className="block text-xs text-gray-400 font-normal">Cannot be changed</span>
+                      </div>
+                    ) : (
+                      <Select.Root value={form.unitId} onValueChange={(v) => setForm((f) => ({ ...f, unitId: v, newUnitCode: '', newUnitName: '' }))}>
+                        <Select.Trigger className="w-full flex items-center justify-between border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                          <Select.Value placeholder="Select unit…" />
+                          <Select.Icon><ChevronDown size={16} className="text-gray-500" /></Select.Icon>
+                        </Select.Trigger>
+                        <Select.Portal>
+                          <Select.Content className="bg-white border border-gray-200 rounded-xl shadow-lg z-[60] overflow-hidden max-h-64">
+                            <Select.Viewport className="p-1">
+                              {units.map((u) => (
+                                <Select.Item key={u.id} value={u.id}
+                                  className="flex items-center px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-blue-50 focus:bg-blue-50 focus:outline-none">
+                                  <Select.ItemText>{u.code} — {u.name}</Select.ItemText>
+                                </Select.Item>
+                              ))}
+                            </Select.Viewport>
+                          </Select.Content>
+                        </Select.Portal>
+                      </Select.Root>
+                    )}
                   </div>
                 </div>
+
+                {/* New custom unit fields — full width, shown only when creating and no unit selected */}
+                {!editingProduct && !form.unitId && (
+                  <div className="order-3 space-y-1.5">
+                    <Label.Root className="text-xs text-gray-500">Or define a new unit</Label.Root>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        placeholder="Code (e.g. BAL)"
+                        value={form.newUnitCode}
+                        onChange={(e) => setForm((f) => ({ ...f, newUnitCode: e.target.value.toUpperCase() }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <input
+                        placeholder="Name (e.g. Bale)"
+                        value={form.newUnitName}
+                        onChange={(e) => setForm((f) => ({ ...f, newUnitName: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-3 order-3">
                   <div className="space-y-1.5">
@@ -738,17 +818,38 @@ function ProductsPageContent() {
                   <div className="space-y-1.5 order-3">
                     {(() => {
                       const currentStock = stockByProductId[editingProduct.id] ?? (editingProduct.initialStock ?? 0)
+                      const unitLabel = units.find((u) => u.id === editingProduct.unitId)?.code ?? editingProduct.stockUnit ?? 'units'
                       return (
                         <>
                           <div className="flex items-center justify-between">
                             <Label.Root htmlFor="p-addstock" className="text-sm font-medium text-gray-700">Add stock</Label.Root>
                             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${currentStock <= 0 ? 'bg-red-100 text-red-700' : currentStock < 5 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
-                              Currently: {currentStock} {editingProduct.stockUnit ?? 'units'}
+                              Currently: {currentStock} {unitLabel}
                             </span>
                           </div>
-                          <input id="p-addstock" type="number" min="1" step="1" value={form.addStock} onChange={field('addStock')}
-                            placeholder="Enter qty to add (optional)"
-                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                          <div className="flex gap-2">
+                            <input id="p-addstock" type="number" min="0.001" step="any" value={form.addStock} onChange={field('addStock')}
+                              placeholder="Qty to add (optional)"
+                              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                            <Select.Root value={form.restockSource} onValueChange={(v) => setForm((f) => ({ ...f, restockSource: v as TransactionSource }))}>
+                              <Select.Trigger className="flex items-center gap-1 border border-gray-300 rounded-lg px-2 py-2 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 whitespace-nowrap">
+                                <Select.Value />
+                                <Select.Icon><ChevronDown size={12} className="text-gray-500" /></Select.Icon>
+                              </Select.Trigger>
+                              <Select.Portal>
+                                <Select.Content className="bg-white border border-gray-200 rounded-xl shadow-lg z-[60] overflow-hidden">
+                                  <Select.Viewport className="p-1">
+                                    {([['SUPPLIER', 'Supplier'], ['CORRECTION', 'Correction']] as const).map(([val, label]) => (
+                                      <Select.Item key={val} value={val}
+                                        className="flex items-center px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-blue-50 focus:bg-blue-50 focus:outline-none">
+                                        <Select.ItemText>{label}</Select.ItemText>
+                                      </Select.Item>
+                                    ))}
+                                  </Select.Viewport>
+                                </Select.Content>
+                              </Select.Portal>
+                            </Select.Root>
+                          </div>
                         </>
                       )
                     })()}
@@ -807,7 +908,7 @@ function ProductsPageContent() {
                   )}
                 </div>
 
-                <div className="flex gap-2 pt-1 justify-end order-3 sm:sticky sm:bottom-0 sm:bg-white sm:pt-2">
+                <div className="flex gap-2 pt-1 justify-end order-3">
                   <Dialog.Close asChild>
                     <button type="button" className="flex-1 sm:flex-none px-4 py-2.5 sm:py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
                   </Dialog.Close>
@@ -1020,9 +1121,13 @@ function ProductsPageContent() {
                     <td className="px-3 py-2.5 font-medium truncate" title={p.name}>{p.name}</td>
                     <td className="px-3 py-2.5 text-xs text-gray-500 truncate">
                       {p.specification && <span className="font-medium text-gray-700">{p.specification}</span>}
-                      {p.specification && p.stockUnit && <span className="text-gray-400"> · </span>}
-                      {p.stockUnit && <span className="text-gray-400">{p.stockUnit}</span>}
-                      {!p.specification && !p.stockUnit && <span className="text-gray-300">—</span>}
+                      {p.specification && (p.unitId || p.stockUnit) && <span className="text-gray-400"> · </span>}
+                      {(p.unitId || p.stockUnit) && (
+                        <span className="text-gray-400">
+                          {units.find((u) => u.id === p.unitId)?.code ?? p.stockUnit}
+                        </span>
+                      )}
+                      {!p.specification && !p.unitId && !p.stockUnit && <span className="text-gray-300">—</span>}
                     </td>
                     <td className="px-3 py-2.5 font-mono text-xs text-gray-500 truncate" title={p.sku}>{p.sku}</td>
                     <td className="px-3 py-2.5 text-gray-500 truncate font-medium" title={getProductBrand(p)}>{getProductBrand(p)}</td>
@@ -1066,12 +1171,13 @@ function ProductsPageContent() {
                         <input
                           data-restock-input={p.id}
                           type="number"
-                          min="1"
+                          min="0.001"
+                          step="any"
                           placeholder="Qty"
                           value={restockQtys[p.id] ?? ''}
                           onChange={(e) => setRestockQtys((r) => ({ ...r, [p.id]: e.target.value }))}
                           onKeyDown={(e) => e.key === 'Enter' && handleRestock(p)}
-                          className="w-12 border border-gray-200 rounded-lg px-1.5 py-1 text-xs text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-14 border border-gray-200 rounded-lg px-1.5 py-1 text-xs text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                         <button
                           type="button"
@@ -1124,7 +1230,7 @@ function ProductsPageContent() {
                       <p className="text-xs text-gray-500 mt-0.5">{getProductBrand(p)}</p>
                       <div className="mt-2 flex items-center justify-between text-xs">
                         <span className={`font-semibold px-2 py-0.5 rounded-full ${stock <= 0 ? 'bg-red-100 text-red-700' : isLow ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
-                          {stock <= 0 ? 'Out of stock' : `${stock.toLocaleString()} ${p.stockUnit ?? 'units'}`}
+                          {stock <= 0 ? 'Out of stock' : `${stock.toLocaleString()} ${units.find((u) => u.id === p.unitId)?.code ?? p.stockUnit ?? 'units'}`}
                         </span>
                         <span className="font-medium text-gray-900">{p.sellingPrice.toLocaleString()}</span>
                       </div>

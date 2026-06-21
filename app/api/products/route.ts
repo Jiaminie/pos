@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, name, sku, barcode, sellingPrice, costPrice, lowestPrice, imageUrl, category, brand, specification, stockUnit } = body;
+    const { id, name, sku, barcode, sellingPrice, costPrice, lowestPrice, imageUrl, category, brand, specification, stockUnit, unitId } = body;
 
     if (!name || !sku || !brand?.trim() || sellingPrice == null || costPrice == null) {
       return Response.json(
@@ -88,7 +88,9 @@ export async function POST(request: NextRequest) {
         category: category ?? null,
         specification: specification ?? null,
         stockUnit: stockUnit ?? null,
+        ...(unitId ? { unitId } : {}),
       },
+      include: { unit: true },
     });
     return Response.json({ data: product, error: null }, { status: 201 });
   } catch (err) {

@@ -1,8 +1,13 @@
 import { upsertMany as upsertCategories, replaceAll as replaceCategories } from './categories'
 import { upsertMany as upsertProducts, replaceAll as replaceProducts } from './products'
+import { upsertMany as upsertUnits, replaceAll as replaceUnits } from './units'
+import { upsertMany as upsertOrganizations, replaceAll as replaceOrganizations } from './organizations'
+import { upsertMany as upsertBranches, replaceAll as replaceBranches } from './branches'
+import { upsertMany as upsertTransfers } from './transfers'
 import { clearAll as clearTransactions } from './transactions'
 import { inferBrand, normalizeBrand } from '../brands'
-import type { Product, ProductCategory } from '../types'
+import { getMyBranchId } from '../branch'
+import type { Product, ProductCategory, Unit, Organization, Branch, StockTransfer } from '../types'
 import type { CatalogSyncProgress } from './sync-progress'
 import { initialSyncProgress } from './sync-progress'
 
@@ -26,7 +31,15 @@ type SyncOptions = {
   onProgress?: (progress: CatalogSyncProgress) => void
 }
 
-type CatalogFetch = { categories: ProductCategory[]; products: Product[]; totalProducts?: number }
+type CatalogFetch = {
+  categories: ProductCategory[]
+  products: Product[]
+  units: Unit[]
+  organizations: Organization[]
+  branches: Branch[]
+  transfers: StockTransfer[]
+  totalProducts?: number
+}
 
 async function fetchCatalogFromServer(
   onProgress?: (progress: CatalogSyncProgress) => void,
@@ -40,9 +53,43 @@ async function fetchCatalogFromServer(
 
   report({ phase: 'categories', message: 'Fetching categories…' })
 
-  const catRes = await fetch('/api/products/categories', { cache: 'no-store' })
+  const branchId = getMyBranchId()
+
+  // Fetch reference data in parallel
+  const [catRes, unitsRes, branchesRes, transfersRes] = await Promise.all([
+    fetch('/api/products/categories', { cache: 'no-store' }),
+    fetch('/api/units', { cache: 'no-store' }),
+    fetch('/api/branches', { cache: 'no-store' }),
+    branchId
+      ? fetch(`/api/transfers?branchId=${branchId}&direction=incoming&status=PENDING`, { cache: 'no-store' })
+      : Promise.resolve(null),
+  ])
+
   if (!catRes.ok) return null
   const { data: catData } = await catRes.json()
+  const units: Unit[] = unitsRes.ok ? ((await unitsRes.json()).data ?? []) : []
+
+  // Branches + org from branches response
+  const branchesData: Branch[] = branchesRes?.ok ? ((await branchesRes.json()).data ?? []) : []
+  const organizations: Organization[] = branchesData.length > 0
+    ? [{ id: branchesData[0].organizationId, name: '', country: 'KE' }]
+    : []
+
+  const transfers: StockTransfer[] = transfersRes?.ok
+    ? ((await transfersRes.json()).data ?? []).map((t: Record<string, unknown>) => ({
+        id:           t.id,
+        fromBranchId: t.fromBranchId,
+        toBranchId:   t.toBranchId,
+        productId:    t.productId,
+        quantity:     Number(t.quantity),
+        status:       t.status,
+        note:         t.note ?? undefined,
+        fromDeviceId: t.fromDeviceId,
+        toDeviceId:   t.toDeviceId ?? undefined,
+        createdAt:    typeof t.createdAt === 'string' ? t.createdAt : new Date(t.createdAt as string).toISOString(),
+        receivedAt:   t.receivedAt ? (typeof t.receivedAt === 'string' ? t.receivedAt : new Date(t.receivedAt as string).toISOString()) : undefined,
+      }))
+    : []
 
   const categories: ProductCategory[] = ((catData?.categories ?? []) as string[])
     .filter(Boolean)
@@ -103,7 +150,7 @@ async function fetchCatalogFromServer(
       recentNames.push(p.name)
     }
 
-    cursor = meta?.hasMore ? meta.nextCursor : null
+    cursor = meta?.hasMore ? (meta.nextCursor as string | null) : null
 
     report({
       phase: 'download',
@@ -119,7 +166,7 @@ async function fetchCatalogFromServer(
 
   if (totalProducts != null && totalProducts > 0 && products.length === 0) return null
 
-  return { categories, products, totalProducts }
+  return { categories, products, units, organizations, branches: branchesData, transfers, totalProducts }
 }
 
 export async function syncFromServer(options: SyncOptions = {}): Promise<boolean> {
@@ -134,7 +181,7 @@ export async function syncFromServer(options: SyncOptions = {}): Promise<boolean
     const catalog = await fetchCatalogFromServer(onProgress)
     if (!catalog) return false
 
-    const { categories, products } = catalog
+    const { categories, products, units, organizations, branches, transfers } = catalog
 
     if (replace) {
       onProgress?.({
@@ -150,10 +197,17 @@ export async function syncFromServer(options: SyncOptions = {}): Promise<boolean
       if (wipeTx) await clearTransactions()
       await replaceCategories(categories)
       await replaceProducts(products)
+      if (units.length > 0)         await replaceUnits(units)
+      if (organizations.length > 0) await replaceOrganizations(organizations)
+      if (branches.length > 0)      await replaceBranches(branches)
     } else {
-      if (categories.length > 0) await upsertCategories(categories)
-      if (products.length > 0) await upsertProducts(products)
+      if (categories.length > 0)    await upsertCategories(categories)
+      if (products.length > 0)      await upsertProducts(products)
+      if (units.length > 0)         await upsertUnits(units)
+      if (organizations.length > 0) await upsertOrganizations(organizations)
+      if (branches.length > 0)      await upsertBranches(branches)
     }
+    if (transfers.length > 0) await upsertTransfers(transfers)
 
     if (typeof window !== 'undefined') {
       localStorage.setItem(SYNC_TS_KEY, String(Date.now()))
@@ -208,7 +262,7 @@ export async function replaceCatalogFromServer(
       return { ok: false, productCount: 0 }
     }
 
-    const { categories, products, totalProducts } = catalog
+    const { categories, products, units, organizations, branches, transfers, totalProducts } = catalog
 
     if (totalProducts != null && totalProducts > 0 && products.length === 0) {
       onProgress?.({
@@ -237,6 +291,10 @@ export async function replaceCatalogFromServer(
     await clearTransactions()
     await replaceCategories(categories)
     await replaceProducts(products)
+    if (units.length > 0)         await replaceUnits(units)
+    if (organizations.length > 0) await replaceOrganizations(organizations)
+    if (branches.length > 0)      await replaceBranches(branches)
+    if (transfers.length > 0)     await upsertTransfers(transfers)
 
     if (typeof window !== 'undefined') {
       localStorage.setItem(SYNC_TS_KEY, String(Date.now()))

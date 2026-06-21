@@ -48,12 +48,13 @@ export async function POST() {
       if (tx.type === "SALE") {
         const listPrice = Number(tx.product.sellingPrice);
         const soldPrice = Number(tx.unitPrice ?? tx.product.sellingPrice);
-        s.sales += tx.quantity;
-        s.listRevenue += tx.quantity * listPrice;
-        s.actualRevenue += tx.quantity * soldPrice;
-        s.discountGiven += tx.quantity * (listPrice - soldPrice);
+        const qty = Number(tx.quantity);
+        s.sales += qty;
+        s.listRevenue += qty * listPrice;
+        s.actualRevenue += qty * soldPrice;
+        s.discountGiven += qty * (listPrice - soldPrice);
       } else if (tx.type === "PURCHASE") {
-        s.purchases += tx.quantity;
+        s.purchases += Number(tx.quantity);
       }
     }
 
@@ -66,7 +67,7 @@ export async function POST() {
     const stockByProduct = new Map<string, number>();
     for (const row of allTime) {
       const prev = stockByProduct.get(row.productId) ?? 0;
-      const qty = row._sum.quantity ?? 0;
+      const qty = Number(row._sum.quantity ?? 0);
       if (row.type === "PURCHASE" || row.type === "RETURN") {
         stockByProduct.set(row.productId, prev + qty);
       } else if (row.type === "SALE" || row.type === "ADJUSTMENT") {
