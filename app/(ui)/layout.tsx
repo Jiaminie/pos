@@ -3,11 +3,23 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { ArrowLeftRight, BarChart3, LayoutDashboard, LayoutGrid, Settings, ShoppingCart, Store } from 'lucide-react'
+import {
+  ArrowLeftRight,
+  BarChart3,
+  LayoutDashboard,
+  LayoutGrid,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Settings,
+  ShoppingCart,
+  Store,
+} from 'lucide-react'
 import { BranchSetup } from '@/components/BranchSetup'
 import { getMyBranchId } from '@/lib/branch'
 import { getAll as getBranches } from '@/lib/db/branches'
 import type { Branch } from '@/lib/types'
+
+const SIDEBAR_COLLAPSED_KEY = 'pos_sidebar_collapsed'
 
 const nav = [
   { href: '/dashboard',  label: 'Dashboard',  icon: LayoutDashboard },
@@ -33,15 +45,25 @@ export default function UILayout({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted]             = useState(false)
   const [branchId, setBranchId]           = useState<string | null>(null)
   const [currentBranch, setCurrentBranch] = useState<Branch | null>(null)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   useEffect(() => {
     const id = getMyBranchId()
     setBranchId(id)
     setMounted(true)
+    setSidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true')
     if (id) {
       getBranches().then((all) => setCurrentBranch(all.find((b) => b.id === id) ?? null))
     }
   }, [])
+
+  function toggleSidebar() {
+    setSidebarCollapsed((prev) => {
+      const next = !prev
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next))
+      return next
+    })
+  }
 
   function isActive(href: string) {
     return pathname === href || pathname.startsWith(`${href}/`)
@@ -66,28 +88,64 @@ export default function UILayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex flex-1 overflow-hidden">
       {/* Desktop sidebar */}
-      <nav className="hidden md:flex w-56 border-r border-gray-200 bg-white flex-col py-5 px-3 gap-1 shrink-0">
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest px-3 mb-1">
-          POS System
-        </p>
+      <nav
+        className={`hidden md:flex border-r border-gray-200 bg-white flex-col shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out ${
+          sidebarCollapsed ? 'w-14' : 'w-56'
+        }`}
+      >
+        <div
+          className={`flex items-center shrink-0 pt-5 pb-2 ${
+            sidebarCollapsed ? 'justify-center px-2' : 'justify-between px-4'
+          }`}
+        >
+          {!sidebarCollapsed && (
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest truncate">
+              POS System
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-expanded={!sidebarCollapsed}
+            className="flex items-center justify-center w-8 h-8 rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-800 transition-colors shrink-0"
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+          </button>
+        </div>
+
         {currentBranch && (
-          <div className="px-3 mb-2">
-            <span className="inline-flex items-center gap-1 text-[10px] bg-blue-50 text-blue-700 border border-blue-100 rounded-full px-2 py-0.5 font-medium">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
-              {currentBranch.name}
-            </span>
+          <div className={`mb-2 ${sidebarCollapsed ? 'flex justify-center px-2' : 'px-4'}`}>
+            {sidebarCollapsed ? (
+              <span
+                className="w-2 h-2 rounded-full bg-blue-500 shrink-0"
+                title={currentBranch.name}
+              />
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[10px] bg-blue-50 text-blue-700 border border-blue-100 rounded-full px-2 py-0.5 font-medium max-w-full">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
+                <span className="truncate">{currentBranch.name}</span>
+              </span>
+            )}
           </div>
         )}
-        {nav.map(({ href, label, icon: Icon }) => (
-          <Link
-            key={href}
-            href={href}
-            className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${navLinkClass(isActive(href))}`}
-          >
-            <Icon size={16} />
-            {label}
-          </Link>
-        ))}
+
+        <div className={`flex flex-col gap-1 flex-1 pb-5 ${sidebarCollapsed ? 'px-2' : 'px-3'}`}>
+          {nav.map(({ href, label, icon: Icon }) => (
+            <Link
+              key={href}
+              href={href}
+              title={sidebarCollapsed ? label : undefined}
+              className={`flex items-center rounded-lg text-sm transition-colors ${
+                sidebarCollapsed ? 'justify-center px-2 py-2.5' : 'gap-2.5 px-3 py-2'
+              } ${navLinkClass(isActive(href))}`}
+            >
+              <Icon size={16} className="shrink-0" />
+              {!sidebarCollapsed && <span className="truncate">{label}</span>}
+            </Link>
+          ))}
+        </div>
       </nav>
 
       <main className="flex-1 overflow-hidden flex flex-col bg-white text-gray-900 min-w-0">

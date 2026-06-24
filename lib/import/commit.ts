@@ -6,7 +6,10 @@ import type { ImportCommitOptions, ImportCommitResult, ImportPreviewRow } from '
 
 import { IMPORT_BATCH_SIZE } from './constants'
 
-const BULK_IMPORT_DEVICE_ID = 'bulk-import'
+// Marker deviceId for opening-stock rows created by historic bulk imports.
+// Those rows are redundant with product.quantity and are removed by
+// scripts/drop-import-stock-txns.ts so the replicated log doesn't double-count.
+export const BULK_IMPORT_DEVICE_ID = 'bulk-import'
 export { IMPORT_BATCH_SIZE }
 
 export type SkuIdMap = Map<string, string>
@@ -53,7 +56,6 @@ export async function commitImportBatch(
 
   const creates: ProductWrite[] = []
   const updates: Array<{ sku: string; data: Omit<ProductWrite, 'id' | 'sku'> }> = []
-  const stockTxs: Array<{ productId: string; quantity: number; unitPrice: number }> = []
 
   for (const row of validRows) {
     const data = {
@@ -79,9 +81,10 @@ export async function commitImportBatch(
       creates.push({ id, sku: row.sku, ...data })
       existingBySku.set(row.sku, id)
       result.created++
-      if (row.openingStock > 0) {
-        stockTxs.push({ productId: id, quantity: row.openingStock, unitPrice: row.costPrice })
-      }
+      // Opening stock is recorded only in product.quantity (the device's stock
+      // baseline). We deliberately do NOT also create a PURCHASE transaction —
+      // devices now replicate the transaction log, and a duplicate opening row
+      // would double-count against the quantity baseline.
     }
   }
 
@@ -92,18 +95,6 @@ export async function commitImportBatch(
       }
       for (const { sku, data } of updates) {
         await tx.product.update({ where: { sku }, data })
-      }
-      if (stockTxs.length > 0) {
-        await tx.inventoryTransaction.createMany({
-          data: stockTxs.map((s) => ({
-            productId: s.productId,
-            type: 'PURCHASE' as const,
-            quantity: s.quantity,
-            unitPrice: s.unitPrice,
-            deviceId: BULK_IMPORT_DEVICE_ID,
-          })),
-        })
-        result.stockTransactions = stockTxs.length
       }
     })
   } catch (err) {

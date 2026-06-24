@@ -30,6 +30,21 @@ export async function create(tx: InventoryTransaction): Promise<void> {
   })
 }
 
+// Idempotent merge keyed by id — used when downloading the server transaction
+// log during sync. `put` overwrites a row with the same id (a transaction this
+// device created and already drained) instead of throwing like `add`.
+export async function upsertMany(items: InventoryTransaction[]): Promise<void> {
+  if (items.length === 0) return
+  const db = await openDb()
+  await new Promise<void>((resolve, reject) => {
+    const idbTx = db.transaction('transactions', 'readwrite')
+    const store = idbTx.objectStore('transactions')
+    for (const item of items) store.put(item)
+    idbTx.oncomplete = () => resolve()
+    idbTx.onerror = () => reject(idbTx.error)
+  })
+}
+
 export async function createMany(items: InventoryTransaction[]): Promise<void> {
   if (items.length === 0) return
   const db = await openDb()

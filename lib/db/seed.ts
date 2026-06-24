@@ -4,10 +4,10 @@ import { upsertMany as upsertUnits, replaceAll as replaceUnits } from './units'
 import { upsertMany as upsertOrganizations, replaceAll as replaceOrganizations } from './organizations'
 import { upsertMany as upsertBranches, replaceAll as replaceBranches } from './branches'
 import { upsertMany as upsertTransfers } from './transfers'
-import { clearAll as clearTransactions } from './transactions'
+import { upsertMany as upsertTransactions } from './transactions'
 import { inferBrand, normalizeBrand } from '../brands'
 import { getMyBranchId } from '../branch'
-import type { Product, ProductCategory, Unit, Organization, Branch, StockTransfer } from '../types'
+import type { Product, ProductCategory, Unit, Organization, Branch, StockTransfer, InventoryTransaction, TransactionType } from '../types'
 import type { CatalogSyncProgress } from './sync-progress'
 import { initialSyncProgress } from './sync-progress'
 
@@ -27,7 +27,6 @@ const SYNC_TS_KEY = 'pos_last_sync_v2'
 type SyncOptions = {
   force?: boolean
   replace?: boolean
-  clearTransactions?: boolean
   onProgress?: (progress: CatalogSyncProgress) => void
 }
 
@@ -38,6 +37,7 @@ type CatalogFetch = {
   organizations: Organization[]
   branches: Branch[]
   transfers: StockTransfer[]
+  transactions: InventoryTransaction[]
   totalProducts?: number
 }
 
@@ -166,11 +166,43 @@ async function fetchCatalogFromServer(
 
   if (totalProducts != null && totalProducts > 0 && products.length === 0) return null
 
-  return { categories, products, units, organizations, branches: branchesData, transfers, totalProducts }
+  // Replicate the full movement log so every device computes identical stock.
+  // Opening stock lives in product.quantity (initialStock); every other change
+  // — sales, restocks, transfer receipts — lives here. Same stable cursor walk
+  // as products. Server enum maps back to the client's: PURCHASE/RETURN are
+  // stock-increasing (STOCK_IN); SALE/TRANSFER_OUT/ADJUSTMENT pass through.
+  report({ phase: 'download', message: 'Downloading stock movements…', productsLoaded: products.length, totalProducts })
+  const transactions: InventoryTransaction[] = []
+  let txCursor: string | null = null
+  const branchParam = branchId ? `&branchId=${branchId}` : ''
+  do {
+    const url: string = `/api/transactions?slim=1&limit=200${branchParam}${txCursor ? `&cursor=${txCursor}` : ''}`
+    const res = await fetch(url, { cache: 'no-store' })
+    if (!res.ok) break
+    const { data, meta } = await res.json()
+    for (const t of data) {
+      const type: TransactionType =
+        t.type === 'PURCHASE' || t.type === 'RETURN' ? 'STOCK_IN' : t.type
+      transactions.push({
+        id: t.id,
+        productId: t.productId,
+        type,
+        quantity: Number(t.quantity),
+        unitPrice: t.unitPrice != null ? Number(t.unitPrice) : undefined,
+        source: t.source ?? undefined,
+        sourceBranchId: t.sourceBranchId ?? undefined,
+        branchId: t.branchId ?? undefined,
+        createdAt: typeof t.createdAt === 'string' ? t.createdAt : new Date(t.createdAt).toISOString(),
+      })
+    }
+    txCursor = meta?.hasMore ? (meta.nextCursor as string | null) : null
+  } while (txCursor)
+
+  return { categories, products, units, organizations, branches: branchesData, transfers, transactions, totalProducts }
 }
 
 export async function syncFromServer(options: SyncOptions = {}): Promise<boolean> {
-  const { force = false, replace = false, clearTransactions: wipeTx = false, onProgress } = options
+  const { force = false, replace = false, onProgress } = options
 
   if (!force && typeof window !== 'undefined') {
     const last = parseInt(localStorage.getItem(SYNC_TS_KEY) ?? '0', 10)
@@ -181,7 +213,7 @@ export async function syncFromServer(options: SyncOptions = {}): Promise<boolean
     const catalog = await fetchCatalogFromServer(onProgress)
     if (!catalog) return false
 
-    const { categories, products, units, organizations, branches, transfers } = catalog
+    const { categories, products, units, organizations, branches, transfers, transactions } = catalog
 
     if (replace) {
       onProgress?.({
@@ -194,7 +226,6 @@ export async function syncFromServer(options: SyncOptions = {}): Promise<boolean
         recentNames: [],
         elapsedMs: 0,
       })
-      if (wipeTx) await clearTransactions()
       await replaceCategories(categories)
       await replaceProducts(products)
       if (units.length > 0)         await replaceUnits(units)
@@ -208,6 +239,10 @@ export async function syncFromServer(options: SyncOptions = {}): Promise<boolean
       if (branches.length > 0)      await upsertBranches(branches)
     }
     if (transfers.length > 0) await upsertTransfers(transfers)
+    // Merge by id — never clear. Preserves this device's not-yet-uploaded
+    // movements while pulling in everyone else's. Drained ones re-arrive with
+    // the same id and overwrite harmlessly (no double count).
+    if (transactions.length > 0) await upsertTransactions(transactions)
 
     if (typeof window !== 'undefined') {
       localStorage.setItem(SYNC_TS_KEY, String(Date.now()))
@@ -262,7 +297,7 @@ export async function replaceCatalogFromServer(
       return { ok: false, productCount: 0 }
     }
 
-    const { categories, products, units, organizations, branches, transfers, totalProducts } = catalog
+    const { categories, products, units, organizations, branches, transfers, transactions, totalProducts } = catalog
 
     if (totalProducts != null && totalProducts > 0 && products.length === 0) {
       onProgress?.({
@@ -288,13 +323,16 @@ export async function replaceCatalogFromServer(
       elapsedMs: elapsed(),
     })
 
-    await clearTransactions()
     await replaceCategories(categories)
     await replaceProducts(products)
     if (units.length > 0)         await replaceUnits(units)
     if (organizations.length > 0) await replaceOrganizations(organizations)
     if (branches.length > 0)      await replaceBranches(branches)
     if (transfers.length > 0)     await upsertTransfers(transfers)
+    // Merge the server movement log by id (don't wipe — keeps un-uploaded
+    // local sales). Opening stock stays in product.quantity, so this never
+    // double-counts it.
+    if (transactions.length > 0)  await upsertTransactions(transactions)
 
     if (typeof window !== 'undefined') {
       localStorage.setItem(SYNC_TS_KEY, String(Date.now()))

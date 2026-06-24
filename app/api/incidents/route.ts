@@ -24,7 +24,9 @@ export async function GET(request: NextRequest) {
           },
         } : {}),
       },
-      orderBy: { createdAt: "desc" },
+      // Total ordering so the id-based cursor walk is stable across pages
+      // (createdAt alone is non-unique and would skip/duplicate rows).
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: limit + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });

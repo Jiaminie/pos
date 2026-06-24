@@ -34,7 +34,13 @@ export async function GET(request: NextRequest) {
 
     const products = await prisma.product.findMany({
       where,
-      orderBy: { createdAt: "desc" },
+      // createdAt is non-unique — bulk imports use createMany, and Postgres
+      // now() returns the transaction timestamp, so an entire import batch
+      // shares one identical created_at. Ordering by createdAt alone is not a
+      // total order, so the id-based cursor walk skips/duplicates rows across
+      // page boundaries non-deterministically (different counts per device —
+      // catalog "drift"). Add id as a tiebreaker for a stable total ordering.
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: limit + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
