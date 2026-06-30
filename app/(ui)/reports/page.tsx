@@ -231,10 +231,15 @@ export default function ReportsPage() {
   const sales     = filtered.filter((t) => t.type === 'SALE')
   const stockIns  = filtered.filter((t) => t.type === 'STOCK_IN')
 
-  const revenue     = sales.reduce((sum, t) => sum + (t.unitPrice ?? productMap[t.productId]?.sellingPrice ?? 0) * t.quantity, 0)
-  const listRevenue = sales.reduce((sum, t) => sum + (productMap[t.productId]?.sellingPrice ?? 0) * t.quantity, 0)
-  const unitsSold    = sales.reduce((sum, t) => sum + t.quantity, 0)
-  const unitsStocked = stockIns.reduce((sum, t) => sum + t.quantity, 0)
+  // Quantities/money are Decimal in the DB; summing as JS floats drifts
+  // (e.g. 21 → 21.0000001 → renders as "21.001"). Round to 2dp so genuine
+  // fractional units survive but sub-unit noise doesn't reach the UI.
+  const round2 = (n: number) => Math.round(n * 100) / 100
+
+  const revenue     = round2(sales.reduce((sum, t) => sum + (t.unitPrice ?? productMap[t.productId]?.sellingPrice ?? 0) * t.quantity, 0))
+  const listRevenue = round2(sales.reduce((sum, t) => sum + (productMap[t.productId]?.sellingPrice ?? 0) * t.quantity, 0))
+  const unitsSold    = round2(sales.reduce((sum, t) => sum + t.quantity, 0))
+  const unitsStocked = round2(stockIns.reduce((sum, t) => sum + t.quantity, 0))
 
   const activityProductIds = Array.from(
     new Set([...sales.map((t) => t.productId), ...stockIns.map((t) => t.productId)]),
@@ -243,10 +248,10 @@ export default function ReportsPage() {
   const allRows: ReportRow[] = activityProductIds.map((id) => {
     const p = productMap[id]
     const pSales   = sales.filter((t) => t.productId === id)
-    const sold     = pSales.reduce((s, t) => s + t.quantity, 0)
-    const stocked  = stockIns.filter((t) => t.productId === id).reduce((s, t) => s + t.quantity, 0)
-    const listRev  = sold * (p?.sellingPrice ?? 0)
-    const actRev   = pSales.reduce((s, t) => s + (t.unitPrice ?? p?.sellingPrice ?? 0) * t.quantity, 0)
+    const sold     = round2(pSales.reduce((s, t) => s + t.quantity, 0))
+    const stocked  = round2(stockIns.filter((t) => t.productId === id).reduce((s, t) => s + t.quantity, 0))
+    const listRev  = round2(sold * (p?.sellingPrice ?? 0))
+    const actRev   = round2(pSales.reduce((s, t) => s + (t.unitPrice ?? p?.sellingPrice ?? 0) * t.quantity, 0))
     return {
       productId:     id,
       name:          p?.name ?? id,
@@ -258,7 +263,7 @@ export default function ReportsPage() {
       stocked,
       listRevenue:   listRev,
       revenue:       actRev,
-      netStock:      stockByProductId[id] ?? (p?.initialStock ?? 0),
+      netStock:      round2(stockByProductId[id] ?? (p?.initialStock ?? 0)),
       isStockOnly:   stocked > 0 && sold === 0,
     }
   })
