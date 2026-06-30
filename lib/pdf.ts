@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { loadSettings, hexToRgb, type PDFSettings } from './settings'
+import { loadSettings, hexToRgb, receiptWidthMm, type PDFSettings } from './settings'
 
 // ─── print ──────────────────────────────────────────────────────────────────
 
@@ -160,8 +160,25 @@ export interface QuotationData {
 export function generateQuotationPDF(data: QuotationData): jsPDF {
   const settings = loadSettings()
   const primary  = hexToRgb(settings.primaryColor)
-  const doc      = new jsPDF({ unit: 'mm', format: 'a4' })
   const cur      = settings.currency
+
+  // Thermal roll formats use a dedicated single-column layout.
+  const rollWidth = receiptWidthMm(settings.receiptFormat)
+  if (rollWidth) {
+    return buildThermalPDF({
+      title: 'QUOTATION',
+      refLabel: 'Ref',
+      refValue: data.quoteRef,
+      date: data.date,
+      customerName: data.customerName,
+      customerPhone: data.customerPhone,
+      items: data.items,
+      total: data.items.reduce((s, i) => s + i.qty * i.unitPrice, 0),
+      note: data.note,
+    }, settings, rollWidth)
+  }
+
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' })
 
   let y = drawHeader(
     doc,
@@ -245,6 +262,169 @@ export function generateQuotationPDF(data: QuotationData): jsPDF {
   return doc
 }
 
+// ─── Thermal roll (80mm / 58mm receipt printers) ──────────────────────────────
+
+interface ThermalLine {
+  name: string
+  sku?: string
+  qty: number
+  unitPrice: number
+  stockUnit?: string
+}
+
+interface ThermalDoc {
+  title: string        // 'RECEIPT' | 'QUOTATION'
+  refLabel: string     // 'Order' | 'Ref'
+  refValue: string
+  date: string
+  customerName?: string
+  customerPhone?: string
+  items: ThermalLine[]
+  total: number
+  note?: string
+}
+
+/**
+ * Draw a single-column receipt sized for a thermal roll. Returns the final y
+ * so the page can be sized to its content (no trailing blank feed).
+ */
+function drawThermal(doc: jsPDF, data: ThermalDoc, settings: PDFSettings, width: number): number {
+  const cur     = settings.currency
+  const primary = hexToRgb(settings.primaryColor)
+  const m       = width >= 80 ? 5 : 4   // side margin
+  const right   = width - m
+  let y = 6
+
+  const rule = () => {
+    doc.setDrawColor(160)
+    doc.setLineWidth(0.15)
+    doc.setLineDashPattern([0.6, 0.6], 0)
+    doc.line(m, y, right, y)
+    doc.setLineDashPattern([], 0)
+    y += 3.2
+  }
+
+  // ── Logo (centred)
+  if (settings.logoDataUrl) {
+    try {
+      doc.addImage(settings.logoDataUrl, 'PNG', width / 2 - 8, y, 16, 16)
+      y += 18
+    } catch { /* skip broken logo */ }
+  }
+
+  // ── Company name (centred, wrapped)
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(width >= 80 ? 13 : 11)
+  doc.setTextColor(...DARK)
+  ;(doc.splitTextToSize(settings.companyName, width - 2 * m) as string[]).forEach((l) => {
+    doc.text(l, width / 2, y, { align: 'center' }); y += 5.5
+  })
+
+  if (settings.tagline) {
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(7.5)
+    doc.setTextColor(...GRAY_TXT)
+    ;(doc.splitTextToSize(settings.tagline, width - 2 * m) as string[]).forEach((l) => {
+      doc.text(l, width / 2, y, { align: 'center' }); y += 3.6
+    })
+  }
+  y += 1.5
+
+  // ── Document title (brand colour)
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(9)
+  doc.setTextColor(...primary)
+  doc.text(data.title, width / 2, y, { align: 'center' })
+  y += 4
+  rule()
+
+  // ── Meta rows (label left, value right)
+  const meta = (label: string, value: string) => {
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(7.5)
+    doc.setTextColor(...GRAY_TXT)
+    doc.text(label, m, y)
+    doc.setTextColor(...DARK)
+    ;(doc.splitTextToSize(value, width - 2 * m - 22) as string[]).forEach((l, i) => {
+      doc.text(l, right, y + i * 3.4, { align: 'right' })
+    })
+    y += 3.8
+  }
+  meta(`${data.refLabel}:`, data.refValue)
+  meta('Date:', data.date)
+  if (data.customerName) meta('Customer:', data.customerName)
+  if (data.customerPhone) meta('Phone:', data.customerPhone)
+  rule()
+
+  // ── Items: name on its own line(s), then "qty x price ........ amount"
+  data.items.forEach((it) => {
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(8)
+    doc.setTextColor(...DARK)
+    ;(doc.splitTextToSize(it.name, width - 2 * m) as string[]).forEach((l) => {
+      doc.text(l, m, y); y += 3.6
+    })
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(7.5)
+    doc.setTextColor(...GRAY_TXT)
+    const qtyText = `${it.qty}${it.stockUnit ? ' ' + it.stockUnit : ''} x ${it.unitPrice.toLocaleString()}`
+    doc.text(qtyText, m, y)
+    doc.setTextColor(...DARK)
+    doc.text((it.qty * it.unitPrice).toLocaleString(), right, y, { align: 'right' })
+    y += 4.4
+  })
+  rule()
+
+  // ── Total
+  const units = data.items.reduce((s, i) => s + i.qty, 0)
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(11)
+  doc.setTextColor(...DARK)
+  doc.text('TOTAL', m, y)
+  doc.text(`${cur} ${data.total.toLocaleString()}`, right, y, { align: 'right' })
+  y += 5
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(7.5)
+  doc.setTextColor(...GRAY_TXT)
+  doc.text(`Items: ${units}`, m, y)
+  y += 4.5
+
+  // ── Note / terms
+  if (data.note) {
+    rule()
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(7.5)
+    doc.setTextColor(...DARK)
+    ;(doc.splitTextToSize(data.note, width - 2 * m) as string[]).forEach((l) => {
+      doc.text(l, m, y); y += 3.6
+    })
+    y += 0.5
+  }
+
+  // ── Footer
+  rule()
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(7.5)
+  doc.setTextColor(...GRAY_TXT)
+  ;(doc.splitTextToSize(settings.footerText, width - 2 * m) as string[]).forEach((l) => {
+    doc.text(l, width / 2, y, { align: 'center' }); y += 3.6
+  })
+  y += 4
+
+  return y
+}
+
+/** Build a thermal-roll PDF sized to its content height. */
+function buildThermalPDF(data: ThermalDoc, settings: PDFSettings, width: number): jsPDF {
+  // Pass 1 — measure on a tall scratch page.
+  const scratch = new jsPDF({ unit: 'mm', format: [width, 2000] })
+  const height  = drawThermal(scratch, data, settings, width)
+  // Pass 2 — render onto a page sized exactly to the content.
+  const doc = new jsPDF({ unit: 'mm', format: [width, Math.max(height, 40)] })
+  drawThermal(doc, data, settings, width)
+  return doc
+}
+
 // ─── Receipt ──────────────────────────────────────────────────────────────────
 
 export interface ReceiptItem {
@@ -264,13 +444,29 @@ export interface ReceiptData {
 export function generateReceiptPDF(data: ReceiptData): jsPDF {
   const settings = loadSettings()
   const primary  = hexToRgb(settings.primaryColor)
-  const doc      = new jsPDF({ unit: 'mm', format: 'a4' })
   const cur      = settings.currency
+
+  // Thermal roll formats use a dedicated single-column layout.
+  const title = settings.receiptTitle?.trim() || 'RECEIPT'
+
+  const rollWidth = receiptWidthMm(settings.receiptFormat)
+  if (rollWidth) {
+    return buildThermalPDF({
+      title,
+      refLabel: 'Order',
+      refValue: data.orderId,
+      date: data.date,
+      items: data.items,
+      total: data.total,
+    }, settings, rollWidth)
+  }
+
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' })
 
   let y = drawHeader(
     doc,
     settings.companyName,
-    `Receipt • ${data.date}`,
+    `${title} • ${data.date}`,
     settings,
   )
 

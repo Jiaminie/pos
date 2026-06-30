@@ -185,6 +185,8 @@ model StoreSettings {
   footerText       String   @default("Thank you for your business.") @map("footer_text")
   minMarkupPercent Decimal  @default(150) @map("min_markup_percent")
   posLookupMode    String   @default("catalog") @map("pos_lookup_mode")
+  receiptFormat    String   @default("a4") @map("receipt_format")
+  receiptTitle     String   @default("RECEIPT") @map("receipt_title")
   organizationId   String?  @unique @map("organization_id")
   updatedAt        DateTime @default(now()) @updatedAt @map("updated_at")
 

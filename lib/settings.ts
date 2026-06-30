@@ -32,6 +32,42 @@ export function defaultPosLookupMode(): PosLookupMode {
   return parsePosLookupMode(env)
 }
 
+export type ReceiptFormat = 'a4' | '80mm' | '58mm'
+
+export const RECEIPT_FORMATS: {
+  value: ReceiptFormat
+  label: string
+  description: string
+}[] = [
+  {
+    value: 'a4',
+    label: 'A4 sheet',
+    description: 'Full-page receipts and quotations — best for office/inkjet/laser printers and PDF sharing.',
+  },
+  {
+    value: '80mm',
+    label: 'Thermal 80mm',
+    description: 'Narrow roll for 80mm thermal & ETR receipt printers — the common till-roll width.',
+  },
+  {
+    value: '58mm',
+    label: 'Thermal 58mm',
+    description: 'Compact roll for small 58mm thermal & mobile receipt printers.',
+  },
+]
+
+export function parseReceiptFormat(value: unknown): ReceiptFormat {
+  if (value === '80mm' || value === '58mm' || value === 'a4') return value
+  return 'a4'
+}
+
+/** Roll width in mm for a thermal format, or null for full-page A4. */
+export function receiptWidthMm(format: ReceiptFormat): number | null {
+  if (format === '80mm') return 80
+  if (format === '58mm') return 58
+  return null
+}
+
 export interface PDFSettings {
   companyName: string
   tagline: string
@@ -43,6 +79,10 @@ export interface PDFSettings {
   minMarkupPercent: number
   /** How cashiers find products at the register. */
   posLookupMode: PosLookupMode
+  /** Paper format for printed receipts & quotations (A4 vs thermal roll widths). */
+  receiptFormat: ReceiptFormat
+  /** Heading printed on the sales receipt, e.g. "RECEIPT", "SALES RECEIPT". */
+  receiptTitle: string
 }
 
 export const DEFAULT_SETTINGS: PDFSettings = {
@@ -54,6 +94,8 @@ export const DEFAULT_SETTINGS: PDFSettings = {
   footerText: 'Thank you for your business.',
   minMarkupPercent: 150,
   posLookupMode: 'catalog',
+  receiptFormat: 'a4',
+  receiptTitle: 'RECEIPT',
 }
 
 const KEY = 'pos-pdf-settings'
@@ -69,6 +111,8 @@ export function loadSettings(): PDFSettings {
       ...DEFAULT_SETTINGS,
       ...parsed,
       posLookupMode: parsePosLookupMode(parsed.posLookupMode),
+      receiptFormat: parseReceiptFormat(parsed.receiptFormat),
+      receiptTitle: typeof parsed.receiptTitle === 'string' ? parsed.receiptTitle : DEFAULT_SETTINGS.receiptTitle,
     }
   } catch {
     return DEFAULT_SETTINGS
@@ -96,6 +140,8 @@ export async function fetchSettings(): Promise<PDFSettings> {
       footerText:   data.footerText   ?? DEFAULT_SETTINGS.footerText,
       minMarkupPercent: Number(data.minMarkupPercent ?? DEFAULT_SETTINGS.minMarkupPercent),
       posLookupMode: parsePosLookupMode(data.posLookupMode),
+      receiptFormat: parseReceiptFormat(data.receiptFormat),
+      receiptTitle: data.receiptTitle ?? DEFAULT_SETTINGS.receiptTitle,
     }
     cacheSettings(s)
     return s
