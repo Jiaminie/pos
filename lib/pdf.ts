@@ -569,6 +569,74 @@ export interface COBReportData {
   abc?: ABCAnalysis     // stock movement analysis (ABC)
 }
 
+/** Stock Movement (ABC) section — summary + slow-mover action list. Returns y after. */
+function drawStockMovement(doc: jsPDF, abc: ABCAnalysis, y: number, primary: RGB, cur: string): number {
+  y = drawSectionHeader(doc, 'Stock Movement Analysis (ABC)', y, primary)
+
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(8)
+  doc.setTextColor(...GRAY_TXT)
+  const legend = 'A = top 70% of revenue (fast movers)    B = next 20% (medium movers)    C = bottom 10% + zero sales (slow movers)'
+  const legendLines = doc.splitTextToSize(legend, CONTENT - 10) as string[]
+  doc.text(legendLines, MARGIN + 5, y)
+  y += legendLines.length * 4 + 2
+
+  autoTable(doc, {
+    startY: y,
+    head: [['Class', 'Movers', 'Products', `Revenue (${cur})`, '% of Revenue']],
+    body: abc.summary.map((s) => [
+      s.className,
+      s.label,
+      String(s.products),
+      s.revenue.toLocaleString(),
+      `${(s.revenueShare * 100).toFixed(1)}%`,
+    ]),
+    headStyles: { fillColor: primary, textColor: WHITE, fontSize: 8 },
+    bodyStyles: { fontSize: 8 },
+    columnStyles: { 0: { fontStyle: 'bold' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
+    margin: { left: MARGIN, right: MARGIN },
+  })
+  y = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8
+
+  // ── Slow movers needing attention. Deliberately VIOLET, not amber —
+  // "dead/cold stock not moving" is the opposite problem to the amber
+  // "Low Stock Alert" (running out), so they must not share a colour.
+  if (abc.slowMovers.length > 0) {
+    const violet: RGB = [124, 58, 237]
+    const violetBg: RGB = [245, 243, 255]
+    doc.setFillColor(...violetBg)
+    doc.roundedRect(MARGIN, y, CONTENT, 10, 1.5, 1.5, 'F')
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(9)
+    doc.setTextColor(...violet)
+    const showing = abc.slowMoverTotal > abc.slowMovers.length
+      ? `Slow Movers - Overstocked / Not Selling  (showing ${abc.slowMovers.length} of ${abc.slowMoverTotal})`
+      : 'Slow Movers - Overstocked / Not Selling'
+    doc.text(showing, MARGIN + 5, y + 6.8)
+    y += 14
+
+    autoTable(doc, {
+      startY: y,
+      head: [['Product', 'SKU', 'Sold', `Revenue (${cur})`, 'Last Sale']],
+      body: abc.slowMovers.map((r) => [
+        r.name,
+        r.sku,
+        String(r.sold),
+        r.revenue.toLocaleString(),
+        r.lastSale,
+      ]),
+      headStyles: { fillColor: violet, textColor: WHITE, fontSize: 8 },
+      bodyStyles: { fontSize: 8 },
+      columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' } },
+      alternateRowStyles: { fillColor: [250, 250, 252] },
+      margin: { left: MARGIN, right: MARGIN },
+    })
+    y = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8
+  }
+
+  return y
+}
+
 export function generateCOBReportPDF(data: COBReportData): jsPDF {
   const settings = loadSettings()
   const primary  = hexToRgb(settings.primaryColor)
@@ -598,72 +666,6 @@ export function generateCOBReportPDF(data: COBReportData): jsPDF {
   y = drawKPIRow(doc, kpis, y)
   y += 6
 
-  // ── Stock Movement Analysis (ABC) — the most actionable view, shown first
-  if (data.abc && data.abc.summary.length > 0) {
-    y = drawSectionHeader(doc, 'Stock Movement Analysis (ABC)', y, primary)
-
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8)
-    doc.setTextColor(...GRAY_TXT)
-    const legend = 'A = top 70% of revenue (fast movers)    B = next 20% (medium movers)    C = bottom 10% + zero sales (slow movers)'
-    const legendLines = doc.splitTextToSize(legend, CONTENT - 10) as string[]
-    doc.text(legendLines, MARGIN + 5, y)
-    y += legendLines.length * 4 + 2
-
-    autoTable(doc, {
-      startY: y,
-      head: [['Class', 'Movers', 'Products', `Revenue (${cur})`, '% of Revenue']],
-      body: data.abc.summary.map((s) => [
-        s.className,
-        s.label,
-        String(s.products),
-        s.revenue.toLocaleString(),
-        `${(s.revenueShare * 100).toFixed(1)}%`,
-      ]),
-      headStyles: { fillColor: primary, textColor: WHITE, fontSize: 8 },
-      bodyStyles: { fontSize: 8 },
-      columnStyles: { 0: { fontStyle: 'bold' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
-      margin: { left: MARGIN, right: MARGIN },
-    })
-    y = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8
-
-    // ── Slow movers needing attention. Deliberately VIOLET, not amber —
-    // "dead/cold stock not moving" is the opposite problem to the amber
-    // "Low Stock Alert" (running out), so they must not share a colour.
-    if (data.abc.slowMovers.length > 0) {
-      const violet: RGB = [124, 58, 237]
-      const violetBg: RGB = [245, 243, 255]
-      doc.setFillColor(...violetBg)
-      doc.roundedRect(MARGIN, y, CONTENT, 10, 1.5, 1.5, 'F')
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(9)
-      doc.setTextColor(...violet)
-      const showing = data.abc.slowMoverTotal > data.abc.slowMovers.length
-        ? `Slow Movers - Overstocked / Not Selling  (showing ${data.abc.slowMovers.length} of ${data.abc.slowMoverTotal})`
-        : 'Slow Movers - Overstocked / Not Selling'
-      doc.text(showing, MARGIN + 5, y + 6.8)
-      y += 14
-
-      autoTable(doc, {
-        startY: y,
-        head: [['Product', 'SKU', 'Sold', `Revenue (${cur})`, 'Last Sale']],
-        body: data.abc.slowMovers.map((r) => [
-          r.name,
-          r.sku,
-          String(r.sold),
-          r.revenue.toLocaleString(),
-          r.lastSale,
-        ]),
-        headStyles: { fillColor: violet, textColor: WHITE, fontSize: 8 },
-        bodyStyles: { fontSize: 8 },
-        columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' } },
-        alternateRowStyles: { fillColor: [250, 250, 252] },
-        margin: { left: MARGIN, right: MARGIN },
-      })
-      y = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8
-    }
-  }
-
   // ── Sales Summary narrative
   y = drawSectionHeader(doc, 'Sales Summary', y, primary)
   const noActivity = data.rows.length === 0
@@ -684,12 +686,21 @@ export function generateCOBReportPDF(data: COBReportData): jsPDF {
   // ── Product Breakdown table
   y = drawSectionHeader(doc, 'Product Breakdown', y, primary)
   const showBothPrices = data.rows.some((r) => r.listRevenue !== r.revenue)
+  const totSold        = data.rows.reduce((s, r) => s + r.sold, 0)
+  const totRevenue     = data.rows.reduce((s, r) => s + r.revenue, 0)
+  const totListRevenue = data.rows.reduce((s, r) => s + (r.listRevenue ?? r.revenue), 0)
+  const totalRow = showBothPrices
+    ? [{ content: 'TOTAL', colSpan: 4, styles: { halign: 'right' as const } }, String(totSold), '', totListRevenue.toLocaleString(), totRevenue.toLocaleString(), '']
+    : [{ content: 'TOTAL', colSpan: 4, styles: { halign: 'right' as const } }, String(totSold), '', totRevenue.toLocaleString(), '']
   autoTable(doc, {
     startY: y,
     head: [showBothPrices
       ? ['Product', 'Spec', 'SKU', 'Category', 'Sold', 'Stocked', `List Rev (${cur})`, `Actual Rev (${cur})`, 'Net Stock']
       : ['Product', 'Spec', 'SKU', 'Category', 'Sold', 'Stocked', `Revenue (${cur})`, 'Net Stock']
     ],
+    foot: [totalRow],
+    footStyles: { fillColor: GRAY_BG, textColor: DARK, fontStyle: 'bold', fontSize: 8 },
+    showFoot: 'lastPage',
     body: data.rows.map((r) => {
       const base = [
         r.name,
@@ -719,6 +730,14 @@ export function generateCOBReportPDF(data: COBReportData): jsPDF {
     alternateRowStyles: { fillColor: [249, 250, 251] },
     margin: { left: MARGIN, right: MARGIN },
   })
+
+  // ── Stock Movement Analysis (ABC) — follows the breakdown
+  if (data.abc && data.abc.summary.length > 0) {
+    let smy = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8
+    const pageH = doc.internal.pageSize.getHeight()
+    if (smy > pageH - 50) { doc.addPage(); smy = MARGIN }
+    drawStockMovement(doc, data.abc, smy, primary, cur)
+  }
 
   // ── Low Stock Alert section (if any)
   if (data.lowStockItems.length > 0) {
