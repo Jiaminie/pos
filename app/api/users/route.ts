@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/server/db'
-import { requireUser, isAuthUser, canManageUsers, requirePermission, branchFilter } from '@/lib/server/auth/guard'
+import { requireUser, isAuthUser, canManageUsers, requirePermission } from '@/lib/server/auth/guard'
 import { hashPin, validatePinFormat } from '@/lib/server/auth/pin'
 import { logAudit } from '@/lib/server/audit'
 import type { Role } from '@prisma/client'
@@ -15,14 +15,21 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url)
   const requestedBranch = searchParams.get('branchId')
-  const filter = branchFilter(user, requestedBranch)
+
+  // Owners manage the whole org and only narrow by branch when one is explicitly
+  // requested — never by their current session branch, or members created in
+  // other branches would silently vanish from the Team list. Managers stay
+  // pinned to the cashiers in their own branch.
+  const where =
+    user.role === 'MANAGER'
+      ? { organizationId: user.orgId, branchId: user.branchId ?? undefined, role: 'CASHIER' as Role }
+      : {
+          organizationId: user.orgId,
+          ...(requestedBranch ? { branchId: requestedBranch } : {}),
+        }
 
   const users = await prisma.user.findMany({
-    where: {
-      organizationId: user.orgId,
-      ...(user.role === 'MANAGER' ? { branchId: user.branchId ?? undefined, role: 'CASHIER' } : {}),
-      ...(filter.branchId ? { branchId: filter.branchId } : {}),
-    },
+    where,
     include: { branch: { select: { id: true, name: true, code: true } } },
     orderBy: [{ role: 'asc' }, { name: 'asc' }],
   })
