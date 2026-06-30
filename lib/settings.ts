@@ -161,6 +161,44 @@ export async function saveSettings(s: PDFSettings): Promise<void> {
   if (!res.ok) throw new Error('Failed to save settings'  )
 }
 
+// ── Email / notification settings (stored in DB, never in localStorage)
+
+export interface EmailSettings {
+  resendApiKey: string   // Resend API key — stored in DB, used server-side only
+  reportEmail:  string   // recipient address for daily COB report
+  fromEmail:    string   // sender address, e.g. info@kianyingi.com (must be Resend-verified)
+}
+
+export const DEFAULT_EMAIL_SETTINGS: EmailSettings = {
+  resendApiKey: '',
+  reportEmail:  '',
+  fromEmail:    '',
+}
+
+export async function fetchEmailSettings(): Promise<EmailSettings> {
+  try {
+    const res = await fetch('/api/settings')
+    if (!res.ok) throw new Error('fetch failed')
+    const { data } = await res.json()
+    return {
+      resendApiKey: data.resendApiKey ?? '',
+      reportEmail:  data.reportEmail  ?? '',
+      fromEmail:    data.fromEmail    ?? '',
+    }
+  } catch {
+    return DEFAULT_EMAIL_SETTINGS
+  }
+}
+
+export async function saveEmailSettings(s: EmailSettings): Promise<void> {
+  const res = await fetch('/api/settings', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(s),
+  })
+  if (!res.ok) throw new Error('Failed to save email settings')
+}
+
 /** Convert "#rrggbb" → [r, g, b] */
 export function hexToRgb(hex: string): [number, number, number] {
   const clean = hex.replace('#', '')

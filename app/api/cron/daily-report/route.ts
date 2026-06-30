@@ -8,15 +8,28 @@ import { parseReceiptFormat, parsePosLookupMode } from '@/lib/settings'
 const LOW_STOCK_THRESHOLD = 5
 
 export async function POST() {
-  const resend = new Resend(process.env.RESEND_API_KEY)
   try {
     const start = new Date()
     start.setHours(0, 0, 0, 0)
     const end = new Date()
     end.setHours(23, 59, 59, 999)
 
-    // ── Load store settings from DB for PDF branding
+    // ── Load store settings from DB for PDF branding + email config
     const dbSettings = await prisma.storeSettings.findFirst()
+
+    const resendKey = dbSettings?.resendApiKey || process.env.RESEND_API_KEY
+    const toEmail   = dbSettings?.reportEmail  || process.env.REPORT_EMAIL
+    if (!resendKey || !toEmail) {
+      return Response.json({ data: null, error: 'Resend API key or report email not configured' }, { status: 400 })
+    }
+
+    const fromAddress = dbSettings?.fromEmail
+      ? `${dbSettings.companyName ?? 'POS'} <${dbSettings.fromEmail}>`
+      : `${dbSettings?.companyName ?? 'POS'} Reports <reports@resend.dev>`
+
+    // Re-initialise Resend with the DB key (overrides the one created at top of function)
+    const resendClient = new Resend(resendKey)
+
     const settings: PDFSettings = {
       companyName:     dbSettings?.companyName    ?? 'My Business',
       tagline:         dbSettings?.tagline        ?? '',
@@ -216,9 +229,9 @@ export async function POST() {
       <p style="color:#6b7280;font-size:12px">This report is generated automatically every evening. Open the PDF for the full breakdown including ABC stock movement analysis.</p>
     `
 
-    await resend.emails.send({
-      from:        `${settings.companyName} POS <reports@resend.dev>`,
-      to:          process.env.REPORT_EMAIL!,
+    await resendClient.emails.send({
+      from:        fromAddress,
+      to:          toEmail,
       subject:     `COB Report — ${dateLabel}`,
       html:        htmlBody,
       attachments: [{ filename, content: pdfBuffer }],

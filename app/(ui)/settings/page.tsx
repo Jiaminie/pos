@@ -1,9 +1,9 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Building2, Check, FileText, GitBranch, Loader2, MapPin, Monitor, Percent, Plus, Receipt, ScanBarcode, Shield, Star, Upload, Users, X } from 'lucide-react'
+import { Building2, Check, FileText, GitBranch, Loader2, Mail, MapPin, Monitor, Percent, Plus, Receipt, ScanBarcode, Shield, Star, Upload, Users, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { fetchSettings, saveSettings, DEFAULT_SETTINGS, POS_LOOKUP_MODES, RECEIPT_FORMATS, type PDFSettings, type PosLookupMode, type ReceiptFormat } from '@/lib/settings'
+import { fetchSettings, saveSettings, fetchEmailSettings, saveEmailSettings, DEFAULT_SETTINGS, DEFAULT_EMAIL_SETTINGS, POS_LOOKUP_MODES, RECEIPT_FORMATS, type PDFSettings, type EmailSettings, type PosLookupMode, type ReceiptFormat } from '@/lib/settings'
 import { getMyBranchId, getMyOrgId, setMyBranchId } from '@/lib/branch'
 import { getAll as getLocalBranches } from '@/lib/db/branches'
 import type { Branch } from '@/lib/types'
@@ -21,7 +21,7 @@ const COLORS = [
   { label: 'Gray',   value: '#374151' },
 ]
 
-type SettingsTab = 'store' | 'pricing' | 'pos' | 'receipts' | 'documents' | 'branches' | 'team' | 'permissions' | 'device'
+type SettingsTab = 'store' | 'pricing' | 'pos' | 'receipts' | 'documents' | 'email' | 'branches' | 'team' | 'permissions' | 'device'
 
 const TABS: { id: SettingsTab; label: string; description: string; icon: typeof Building2 }[] = [
   { id: 'store',     label: 'Store',     description: 'Name, logo & branding',        icon: Building2 },
@@ -29,6 +29,7 @@ const TABS: { id: SettingsTab; label: string; description: string; icon: typeof 
   { id: 'pos',       label: 'POS',       description: 'Checkout & product lookup',    icon: ScanBarcode },
   { id: 'receipts',  label: 'Receipts',  description: 'Receipt & quotation paper size', icon: Receipt },
   { id: 'documents', label: 'Documents', description: 'PDF reports & quotations',     icon: FileText },
+  { id: 'email',     label: 'Email',     description: 'Daily COB report email',       icon: Mail },
   { id: 'branches',  label: 'Branches',  description: 'Create & manage branches',     icon: GitBranch },
   { id: 'team',      label: 'Team',      description: 'Staff, roles & PINs',          icon: Users },
   { id: 'permissions', label: 'Permissions', description: 'Role capability toggles', icon: Shield },
@@ -51,6 +52,11 @@ export default function SettingsPage() {
   const [branchForm, setBranchForm]       = useState<BranchForm>(EMPTY_BRANCH_FORM)
   const [branchSaving, setBranchSaving]   = useState(false)
 
+  // Email tab state
+  const [emailSettings, setEmailSettings] = useState<EmailSettings>(DEFAULT_EMAIL_SETTINGS)
+  const [emailSaving, setEmailSaving]     = useState(false)
+  const [showApiKey, setShowApiKey]       = useState(false)
+
   // Device tab state
   const [deviceBranchId, setDeviceBranchId] = useState<string | null>(null)
   const [deviceChanging, setDeviceChanging]  = useState(false)
@@ -72,6 +78,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     fetchSettings().then((s) => { setSettings(s); setLoading(false) })
+    fetchEmailSettings().then(setEmailSettings)
     setDeviceBranchId(getMyBranchId())
   }, [])
 
@@ -862,6 +869,107 @@ export default function SettingsPage() {
 
             {activeTab === 'permissions' && showPermissionsTab && (
               <PermissionsSection />
+            )}
+
+            {activeTab === 'email' && (
+              <div className="space-y-6">
+                <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-5">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-800">Daily COB Report Email</h3>
+                    <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
+                      Every evening the system emails the day&apos;s Close of Business report as a PDF attachment.
+                      Configure your Resend account details below to enable it.
+                    </p>
+                  </div>
+
+                  {/* Resend API Key */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-gray-700">Resend API Key</label>
+                    <div className="relative">
+                      <input
+                        type={showApiKey ? 'text' : 'password'}
+                        value={emailSettings.resendApiKey}
+                        onChange={(e) => setEmailSettings((s) => ({ ...s, resendApiKey: e.target.value }))}
+                        placeholder="re_xxxxxxxxxxxxxxxxxxxx"
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono pr-20 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowApiKey((v) => !v)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5"
+                      >
+                        {showApiKey ? 'Hide' : 'Show'}
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-400">
+                      Get your key at{' '}
+                      <span className="font-mono text-gray-500">resend.com/api-keys</span>.
+                      The key is stored in the database and never exposed to browsers.
+                    </p>
+                  </div>
+
+                  {/* Report recipient */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-gray-700">Send report to</label>
+                    <input
+                      type="email"
+                      value={emailSettings.reportEmail}
+                      onChange={(e) => setEmailSettings((s) => ({ ...s, reportEmail: e.target.value }))}
+                      placeholder="owner@example.com"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <p className="text-xs text-gray-400">The email address that will receive the nightly PDF report.</p>
+                  </div>
+
+                  {/* Custom from address */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-gray-700">Send from (optional)</label>
+                    <input
+                      type="email"
+                      value={emailSettings.fromEmail}
+                      onChange={(e) => setEmailSettings((s) => ({ ...s, fromEmail: e.target.value }))}
+                      placeholder="info@yourstore.com"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <p className="text-xs text-gray-400">
+                      Use your own domain as the sender, e.g. <span className="font-mono">info@kianyingi.com</span>.
+                      Leave blank to send from <span className="font-mono">reports@resend.dev</span> (Resend shared domain — fine for testing, may land in spam).
+                      To use your own domain you must first verify it in your Resend account under Domains.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={emailSaving}
+                    onClick={async () => {
+                      setEmailSaving(true)
+                      try {
+                        await saveEmailSettings(emailSettings)
+                        toast.success('Email settings saved')
+                      } catch {
+                        toast.error('Failed to save email settings')
+                      } finally {
+                        setEmailSaving(false)
+                      }
+                    }}
+                    className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {emailSaving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                    Save email settings
+                  </button>
+                </section>
+
+                <section className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 space-y-1">
+                  <p className="text-xs font-semibold text-blue-800">Schedule</p>
+                  <p className="text-xs text-blue-700">
+                    The report fires every day at <strong>9:00 PM Nairobi time</strong> (18:00 UTC).
+                    It covers all transactions from midnight to the time it runs.
+                  </p>
+                  <p className="text-xs text-blue-700 mt-1">
+                    The report includes: KPIs, ABC stock movement analysis, product breakdown, low stock alert, and missed sales.
+                  </p>
+                </section>
+              </div>
             )}
 
             {activeTab === 'device' && (

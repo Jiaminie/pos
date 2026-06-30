@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Loader2, Plus, UserPlus } from 'lucide-react'
+import * as Select from '@radix-ui/react-select'
+import { ChevronDown, Loader2, Plus, UserPlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { fetchMe, type AuthUser } from '@/lib/auth'
 import type { Branch, Role, TeamUser } from '@/lib/types'
@@ -180,46 +181,102 @@ export function TeamSection({ branches }: { branches: Branch[] }) {
       {showCreate && (
         <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
           <h3 className="text-sm font-semibold text-gray-800">Add team member</h3>
-          <div className="space-y-3">
-            <input
-              type="text"
-              placeholder="Full name"
-              value={form.name}
-              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-            />
-            {authUser.role === 'OWNER' && (
-              <select
-                value={form.role}
-                onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as Role }))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-              >
-                <option value="CASHIER">Cashier</option>
-                <option value="MANAGER">Manager</option>
-              </select>
-            )}
-            {authUser.role === 'OWNER' && form.role !== 'OWNER' && (
-              <select
-                value={form.branchId}
-                onChange={(e) => setForm((f) => ({ ...f, branchId: e.target.value }))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-              >
-                <option value="">Select branch</option>
-                {branchOptions.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name} ({b.code})</option>
-                ))}
-              </select>
-            )}
-            <div className="flex items-center gap-2">
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-gray-700">Full name</label>
               <input
                 type="text"
-                value={form.pin}
-                onChange={(e) => setForm((f) => ({ ...f, pin: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
-                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono"
+                placeholder="e.g. Jane Wanjiku"
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
-              <button type="button" onClick={() => setForm((f) => ({ ...f, pin: randomPin() }))} className="text-xs text-blue-600 hover:underline shrink-0">
-                Regenerate
-              </button>
+            </div>
+            {authUser.role === 'OWNER' && (
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-gray-700">Role</label>
+                <Select.Root
+                  value={form.role}
+                  onValueChange={(v) => setForm((f) => ({ ...f, role: v as Role }))}
+                >
+                  <Select.Trigger className="w-full flex items-center justify-between gap-2 border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <Select.Value />
+                    <Select.Icon><ChevronDown size={14} className="text-gray-400" /></Select.Icon>
+                  </Select.Trigger>
+                  <Select.Portal>
+                    <Select.Content
+                      className="z-[60] bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden"
+                      position="popper"
+                      sideOffset={4}
+                    >
+                      <Select.Viewport className="p-1">
+                        <Select.Item
+                          value="CASHIER"
+                          className="flex items-center px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-blue-50 outline-none data-[highlighted]:bg-blue-50"
+                        >
+                          <Select.ItemText>Cashier</Select.ItemText>
+                        </Select.Item>
+                        <Select.Item
+                          value="MANAGER"
+                          className="flex items-center px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-blue-50 outline-none data-[highlighted]:bg-blue-50"
+                        >
+                          <Select.ItemText>Manager</Select.ItemText>
+                        </Select.Item>
+                      </Select.Viewport>
+                    </Select.Content>
+                  </Select.Portal>
+                </Select.Root>
+              </div>
+            )}
+            {authUser.role === 'OWNER' && form.role !== 'OWNER' && (
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-gray-700">Branch</label>
+                <Select.Root
+                  value={form.branchId}
+                  onValueChange={(v) => setForm((f) => ({ ...f, branchId: v }))}
+                >
+                  <Select.Trigger className="w-full flex items-center justify-between gap-2 border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <Select.Value placeholder="Select branch" />
+                    <Select.Icon><ChevronDown size={14} className="text-gray-400" /></Select.Icon>
+                  </Select.Trigger>
+                  <Select.Portal>
+                    <Select.Content
+                      className="z-[60] bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden"
+                      position="popper"
+                      sideOffset={4}
+                    >
+                      <Select.Viewport className="p-1">
+                        {branchOptions.map((b) => (
+                          <Select.Item
+                            key={b.id}
+                            value={b.id}
+                            className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-blue-50 outline-none data-[highlighted]:bg-blue-50"
+                          >
+                            <Select.ItemText>
+                              {b.name}{' '}
+                              <span className="text-xs text-gray-500 font-mono">({b.code})</span>
+                            </Select.ItemText>
+                          </Select.Item>
+                        ))}
+                      </Select.Viewport>
+                    </Select.Content>
+                  </Select.Portal>
+                </Select.Root>
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-gray-700">PIN</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={form.pin}
+                  onChange={(e) => setForm((f) => ({ ...f, pin: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
+                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button type="button" onClick={() => setForm((f) => ({ ...f, pin: randomPin() }))} className="text-xs text-blue-600 hover:underline shrink-0">
+                  Regenerate
+                </button>
+              </div>
             </div>
           </div>
           <div className="flex gap-2">

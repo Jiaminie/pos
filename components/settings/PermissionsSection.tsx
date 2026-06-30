@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Loader2, Shield } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   PERMISSION_GROUPS,
@@ -70,8 +70,8 @@ export function PermissionsSection() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-16 text-muted-foreground">
-        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+      <div className="flex items-center gap-2 text-sm text-gray-400 py-4">
+        <Loader2 size={14} className="animate-spin" />
         Loading permissions…
       </div>
     )
@@ -79,7 +79,7 @@ export function PermissionsSection() {
 
   if (!matrix) {
     return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
+      <p className="text-sm text-gray-400 py-4">
         Could not load permissions.
       </p>
     )
@@ -95,63 +95,74 @@ export function PermissionsSection() {
   )
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h2 className="text-lg font-semibold flex items-center gap-2">
-          <Shield className="h-5 w-5" />
-          Roles &amp; Permissions
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
+    <div className="space-y-6">
+      <section className="bg-blue-50/60 border border-blue-200/80 rounded-xl p-5">
+        <p className="text-xs text-blue-900/80 leading-relaxed">
           Toggle capabilities for managers and cashiers. You always have full access; owner-only
           actions (store settings, branches, cost/floor prices) are not listed here.
         </p>
-      </div>
+      </section>
 
       {(Object.keys(PERMISSION_GROUPS) as PermissionGroup[]).map((group) => {
         const items = byGroup[group]
         if (!items?.length) return null
         return (
-          <section key={group} className="rounded-lg border bg-card">
-            <h3 className="border-b px-4 py-3 text-sm font-medium text-muted-foreground">
-              {PERMISSION_GROUPS[group]}
-            </h3>
-            <div className="divide-y">
+          <section key={group} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
+              <h3 className="text-sm font-semibold text-gray-800">{PERMISSION_GROUPS[group]}</h3>
+            </div>
+
+            <div className="hidden sm:grid sm:grid-cols-[1fr_5.5rem_5.5rem] gap-4 px-5 py-2 border-b border-gray-100">
+              <span />
+              {ROLES.map((role) => (
+                <span key={role.id} className="text-center text-xs font-medium text-gray-500">
+                  {role.label}
+                </span>
+              ))}
+            </div>
+
+            <div className="divide-y divide-gray-100">
               {items.map((perm) => (
                 <div
                   key={perm.key}
-                  className="grid grid-cols-[1fr_auto_auto] items-center gap-4 px-4 py-3 sm:grid-cols-[1fr_6rem_6rem]"
+                  className="grid grid-cols-[1fr_auto_auto] sm:grid-cols-[1fr_5.5rem_5.5rem] items-center gap-x-4 gap-y-2 px-5 py-3.5"
                 >
-                  <div>
-                    <p className="text-sm font-medium">{perm.label}</p>
-                    <p className="text-xs text-muted-foreground">{perm.key}</p>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-900">{perm.label}</p>
+                    <p className="text-[11px] font-mono text-gray-400 mt-0.5">{perm.key}</p>
                   </div>
                   {ROLES.map((role) => {
                     const gk = grantKey(role.id, perm.key)
                     const checked = matrix.grants[gk] ?? perm.defaults[role.id]
                     const busy = saving === gk
                     return (
-                      <label
+                      <div
                         key={role.id}
-                        className="flex flex-col items-center gap-1 text-xs text-muted-foreground"
+                        className="flex flex-col items-center gap-1.5 sm:gap-0"
                       >
-                        <span className="hidden sm:inline">{role.label}</span>
+                        <span className="sm:hidden text-[10px] font-medium text-gray-500">
+                          {role.label}
+                        </span>
                         <button
                           type="button"
                           role="switch"
                           aria-checked={checked}
+                          aria-label={`${role.label}: ${perm.label}`}
                           disabled={busy}
                           onClick={() => toggle(role.id, perm.key, !checked)}
-                          className={`relative h-6 w-11 rounded-full transition-colors ${
-                            checked ? 'bg-primary' : 'bg-muted'
-                          } ${busy ? 'opacity-50' : ''}`}
+                          className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                            checked
+                              ? 'border-blue-600 bg-blue-600'
+                              : 'border-gray-300 bg-gray-200'
+                          } ${busy ? 'opacity-50 cursor-wait' : 'cursor-pointer'}`}
                         >
                           <span
-                            className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                              checked ? 'translate-x-5' : ''
+                            className={`pointer-events-none absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                              checked ? 'translate-x-5' : 'translate-x-0'
                             }`}
                           />
                         </button>
-                      </label>
+                      </div>
                     )
                   })}
                 </div>

@@ -27,7 +27,7 @@ export async function PATCH(req: Request) {
 
   try {
     const body = await req.json()
-    const { companyName, tagline, logoDataUrl, primaryColor, currency, footerText, minMarkupPercent, posLookupMode, receiptFormat, receiptTitle } = body
+    const { companyName, tagline, logoDataUrl, primaryColor, currency, footerText, minMarkupPercent, posLookupMode, receiptFormat, receiptTitle, resendApiKey, reportEmail, fromEmail } = body
 
     const settings = await prisma.storeSettings.upsert({
       where: { id: SINGLETON_ID },
@@ -42,6 +42,9 @@ export async function PATCH(req: Request) {
         ...(posLookupMode !== undefined && { posLookupMode: parsePosLookupMode(posLookupMode) }),
         ...(receiptFormat !== undefined && { receiptFormat: parseReceiptFormat(receiptFormat) }),
         ...(receiptTitle  !== undefined && { receiptTitle: String(receiptTitle).slice(0, 40) }),
+        ...(resendApiKey  !== undefined && { resendApiKey: String(resendApiKey) }),
+        ...(reportEmail   !== undefined && { reportEmail:  String(reportEmail) }),
+        ...(fromEmail     !== undefined && { fromEmail:    String(fromEmail) }),
       },
       create: {
         id: SINGLETON_ID,
@@ -55,6 +58,9 @@ export async function PATCH(req: Request) {
         posLookupMode: parsePosLookupMode(posLookupMode ?? defaultPosLookupMode()),
         receiptFormat: parseReceiptFormat(receiptFormat),
         receiptTitle: receiptTitle ? String(receiptTitle).slice(0, 40) : 'RECEIPT',
+        resendApiKey: resendApiKey ?? '',
+        reportEmail:  reportEmail  ?? '',
+        fromEmail:    fromEmail    ?? '',
       },
     })
     return Response.json({ data: settings, error: null })
