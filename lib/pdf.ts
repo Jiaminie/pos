@@ -627,18 +627,20 @@ export function generateCOBReportPDF(data: COBReportData): jsPDF {
     })
     y = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8
 
-    // ── Slow movers needing attention
+    // ── Slow movers needing attention. Deliberately VIOLET, not amber —
+    // "dead/cold stock not moving" is the opposite problem to the amber
+    // "Low Stock Alert" (running out), so they must not share a colour.
     if (data.abc.slowMovers.length > 0) {
-      const amber: RGB = [217, 119, 6]
-      const amberBg: RGB = [255, 251, 235]
-      doc.setFillColor(...amberBg)
+      const violet: RGB = [124, 58, 237]
+      const violetBg: RGB = [245, 243, 255]
+      doc.setFillColor(...violetBg)
       doc.roundedRect(MARGIN, y, CONTENT, 10, 1.5, 1.5, 'F')
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(9)
-      doc.setTextColor(...amber)
+      doc.setTextColor(...violet)
       const showing = data.abc.slowMoverTotal > data.abc.slowMovers.length
-        ? `Slow Movers - Action Needed  (showing ${data.abc.slowMovers.length} of ${data.abc.slowMoverTotal})`
-        : 'Slow Movers - Action Needed'
+        ? `Slow Movers - Overstocked / Not Selling  (showing ${data.abc.slowMovers.length} of ${data.abc.slowMoverTotal})`
+        : 'Slow Movers - Overstocked / Not Selling'
       doc.text(showing, MARGIN + 5, y + 6.8)
       y += 14
 
@@ -652,10 +654,10 @@ export function generateCOBReportPDF(data: COBReportData): jsPDF {
           r.revenue.toLocaleString(),
           r.lastSale,
         ]),
-        headStyles: { fillColor: amber, textColor: WHITE, fontSize: 8 },
+        headStyles: { fillColor: violet, textColor: WHITE, fontSize: 8 },
         bodyStyles: { fontSize: 8 },
         columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' } },
-        alternateRowStyles: { fillColor: [249, 250, 251] },
+        alternateRowStyles: { fillColor: [250, 250, 252] },
         margin: { left: MARGIN, right: MARGIN },
       })
       y = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8
