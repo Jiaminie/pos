@@ -23,7 +23,7 @@ import { PinLogin } from '@/components/PinLogin'
 import { getMyBranchId } from '@/lib/branch'
 import { getAll as getBranches } from '@/lib/db/branches'
 import { replaceCatalogFromServer } from '@/lib/db/seed'
-import { fetchMe, logout, type AuthUser, canViewReports } from '@/lib/auth'
+import { fetchMe, getCachedAuthUser, logout, type AuthUser, canViewReports } from '@/lib/auth'
 import type { Branch } from '@/lib/types'
 import { toast } from 'sonner'
 
@@ -84,13 +84,21 @@ export default function UILayout({ children }: { children: React.ReactNode }) {
   async function afterLogin() {
     setSyncing(true)
     try {
-      await replaceCatalogFromServer()
-      const u = await fetchMe()
+      // Establish the session in the UI first. A catalog-sync hiccup must never
+      // leave authUser null — that strands the user back on the PIN screen and
+      // forces a manual reload (the mount path recovers from the cookie).
+      const u = (await fetchMe()) ?? getCachedAuthUser()
       setAuthUser(u)
       const all = await getBranches()
       setBranches(all)
       const id = getMyBranchId()
       if (id) setCurrentBranch(all.find((b) => b.id === id) ?? null)
+      try {
+        await replaceCatalogFromServer()
+      } catch {
+        toast.error('Catalog sync failed — working from cached data')
+      }
+      router.replace('/pos')
     } finally {
       setSyncing(false)
     }
