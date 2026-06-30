@@ -304,11 +304,13 @@ function drawThermal(doc: jsPDF, data: ThermalDoc, settings: PDFSettings, width:
     y += 3.2
   }
 
-  // ── Logo (centred)
+  // ── Logo (centred). Kept small with clear space below so the company
+  //    name's ascenders never touch it.
   if (settings.logoDataUrl) {
     try {
-      doc.addImage(settings.logoDataUrl, 'PNG', width / 2 - 8, y, 16, 16)
-      y += 18
+      const size = width >= 80 ? 13 : 10
+      doc.addImage(settings.logoDataUrl, 'PNG', width / 2 - size / 2, y, size, size)
+      y += size + 6
     } catch { /* skip broken logo */ }
   }
 
