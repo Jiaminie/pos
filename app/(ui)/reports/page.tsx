@@ -405,6 +405,28 @@ export default function ReportsPage() {
   async function exportPDF() {
     try {
       const { generateCOBReportPDF } = await import('@/lib/pdf')
+
+      // ── Stock movement (ABC) — same classification as the on-screen view
+      const aRev = abcAnalysis.aItems.reduce((s, r) => s + r.revenue, 0)
+      const bRev = abcAnalysis.bItems.reduce((s, r) => s + r.revenue, 0)
+      const cRev = abcAnalysis.cItems.reduce((s, r) => s + r.revenue, 0)
+      const slowPool = [...abcAnalysis.cItems, ...abcAnalysis.zeroSaleProducts]
+      const abc = {
+        summary: [
+          { className: 'A' as const, label: 'Fast movers',   products: abcAnalysis.aItems.length, revenue: aRev, revenueShare: abcAnalysis.aRevShare },
+          { className: 'B' as const, label: 'Medium movers', products: abcAnalysis.bItems.length, revenue: bRev, revenueShare: abcAnalysis.bRevShare },
+          { className: 'C' as const, label: 'Slow movers',   products: abcAnalysis.cItems.length + abcAnalysis.zeroSaleProducts.length, revenue: cRev, revenueShare: abcAnalysis.cRevShare },
+        ],
+        slowMovers: slowPool.slice(0, 25).map((r) => ({
+          name: r.name,
+          sku: r.sku,
+          sold: r.sold,
+          revenue: r.revenue,
+          lastSale: daysSince(r.productId),
+        })),
+        slowMoverTotal: slowPool.length,
+      }
+
       const doc = generateCOBReportPDF({
         dateLabel: rangeLabel,
         revenue,
@@ -412,6 +434,7 @@ export default function ReportsPage() {
         unitsSold,
         lowStockCount,
         rows,
+        abc,
         lowStockItems: lowStockItems.map(({ product, stock }) => ({
           name: product.name,
           sku: product.sku,

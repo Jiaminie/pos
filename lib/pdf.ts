@@ -534,6 +534,28 @@ export interface MissedSaleRow {
   reasons: string // human-readable summary
 }
 
+export interface ABCSummaryRow {
+  className: 'A' | 'B' | 'C'
+  label: string          // 'Fast movers' | 'Medium movers' | 'Slow movers'
+  products: number
+  revenue: number
+  revenueShare: number   // 0..1
+}
+
+export interface SlowMoverRow {
+  name: string
+  sku: string
+  sold: number
+  revenue: number
+  lastSale: string       // 'Today' | 'Never sold' | '3 days ago'
+}
+
+export interface ABCAnalysis {
+  summary: ABCSummaryRow[]      // A, B, C overview
+  slowMovers: SlowMoverRow[]    // capped action list
+  slowMoverTotal: number        // full count, for "showing X of Y"
+}
+
 export interface COBReportData {
   dateLabel: string
   revenue: number       // actual revenue
@@ -544,6 +566,7 @@ export interface COBReportData {
   rows: COBReportRow[]
   lowStockItems: Array<{ name: string; sku: string; stock: number }>
   missedSales?: MissedSaleRow[]
+  abc?: ABCAnalysis     // stock movement analysis (ABC)
 }
 
 export function generateCOBReportPDF(data: COBReportData): jsPDF {
@@ -574,6 +597,70 @@ export function generateCOBReportPDF(data: COBReportData): jsPDF {
   }
   y = drawKPIRow(doc, kpis, y)
   y += 6
+
+  // ── Stock Movement Analysis (ABC) — the most actionable view, shown first
+  if (data.abc && data.abc.summary.length > 0) {
+    y = drawSectionHeader(doc, 'Stock Movement Analysis (ABC)', y, primary)
+
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8)
+    doc.setTextColor(...GRAY_TXT)
+    const legend = 'A = top 70% of revenue (fast movers)    B = next 20% (medium movers)    C = bottom 10% + zero sales (slow movers)'
+    const legendLines = doc.splitTextToSize(legend, CONTENT - 10) as string[]
+    doc.text(legendLines, MARGIN + 5, y)
+    y += legendLines.length * 4 + 2
+
+    autoTable(doc, {
+      startY: y,
+      head: [['Class', 'Movers', 'Products', `Revenue (${cur})`, '% of Revenue']],
+      body: data.abc.summary.map((s) => [
+        s.className,
+        s.label,
+        String(s.products),
+        s.revenue.toLocaleString(),
+        `${(s.revenueShare * 100).toFixed(1)}%`,
+      ]),
+      headStyles: { fillColor: primary, textColor: WHITE, fontSize: 8 },
+      bodyStyles: { fontSize: 8 },
+      columnStyles: { 0: { fontStyle: 'bold' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
+      margin: { left: MARGIN, right: MARGIN },
+    })
+    y = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8
+
+    // ── Slow movers needing attention
+    if (data.abc.slowMovers.length > 0) {
+      const amber: RGB = [217, 119, 6]
+      const amberBg: RGB = [255, 251, 235]
+      doc.setFillColor(...amberBg)
+      doc.roundedRect(MARGIN, y, CONTENT, 10, 1.5, 1.5, 'F')
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(9)
+      doc.setTextColor(...amber)
+      const showing = data.abc.slowMoverTotal > data.abc.slowMovers.length
+        ? `Slow Movers - Action Needed  (showing ${data.abc.slowMovers.length} of ${data.abc.slowMoverTotal})`
+        : 'Slow Movers - Action Needed'
+      doc.text(showing, MARGIN + 5, y + 6.8)
+      y += 14
+
+      autoTable(doc, {
+        startY: y,
+        head: [['Product', 'SKU', 'Sold', `Revenue (${cur})`, 'Last Sale']],
+        body: data.abc.slowMovers.map((r) => [
+          r.name,
+          r.sku,
+          String(r.sold),
+          r.revenue.toLocaleString(),
+          r.lastSale,
+        ]),
+        headStyles: { fillColor: amber, textColor: WHITE, fontSize: 8 },
+        bodyStyles: { fontSize: 8 },
+        columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' } },
+        alternateRowStyles: { fillColor: [249, 250, 251] },
+        margin: { left: MARGIN, right: MARGIN },
+      })
+      y = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8
+    }
+  }
 
   // ── Sales Summary narrative
   y = drawSectionHeader(doc, 'Sales Summary', y, primary)
