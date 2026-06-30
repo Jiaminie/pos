@@ -2,6 +2,41 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { loadSettings, hexToRgb, type PDFSettings } from './settings'
 
+// ─── print ──────────────────────────────────────────────────────────────────
+
+/**
+ * Open the browser print dialog for a generated PDF, so it can be sent to a
+ * connected printer. Loads the PDF into a hidden iframe (avoids popup blockers)
+ * and triggers print once it has rendered.
+ */
+export function printPDF(doc: jsPDF) {
+  doc.autoPrint()
+  const blobUrl = doc.output('bloburl')
+
+  const iframe = document.createElement('iframe')
+  iframe.style.position = 'fixed'
+  iframe.style.right = '0'
+  iframe.style.bottom = '0'
+  iframe.style.width = '0'
+  iframe.style.height = '0'
+  iframe.style.border = '0'
+  iframe.src = String(blobUrl)
+
+  iframe.onload = () => {
+    try {
+      iframe.contentWindow?.focus()
+      iframe.contentWindow?.print()
+    } catch {
+      // Fallback: open in a new tab if the iframe can't be printed directly
+      window.open(String(blobUrl), '_blank')
+    }
+    // Clean up after the dialog has had time to open
+    setTimeout(() => iframe.remove(), 60_000)
+  }
+
+  document.body.appendChild(iframe)
+}
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 type RGB = [number, number, number]
@@ -115,7 +150,7 @@ export interface QuotationItem {
 
 export interface QuotationData {
   customerName: string
-  customerEmail?: string
+  customerPhone?: string
   note?: string
   items: QuotationItem[]
   date: string
@@ -149,11 +184,11 @@ export function generateQuotationPDF(data: QuotationData): jsPDF {
   doc.setTextColor(...DARK)
   doc.text(data.customerName, MARGIN + 5, y)
   y += 6
-  if (data.customerEmail) {
+  if (data.customerPhone) {
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(9)
     doc.setTextColor(...GRAY_TXT)
-    doc.text(data.customerEmail, MARGIN + 5, y)
+    doc.text(data.customerPhone, MARGIN + 5, y)
     y += 6
   }
   y += 4
@@ -205,6 +240,76 @@ export function generateQuotationPDF(data: QuotationData): jsPDF {
     doc.setTextColor(...DARK)
     doc.text(data.note, MARGIN + 5, noteY + 11)
   }
+
+  addFooters(doc, settings)
+  return doc
+}
+
+// ─── Receipt ──────────────────────────────────────────────────────────────────
+
+export interface ReceiptItem {
+  name: string
+  sku?: string
+  qty: number
+  unitPrice: number
+}
+
+export interface ReceiptData {
+  orderId: string
+  items: ReceiptItem[]
+  total: number
+  date: string
+}
+
+export function generateReceiptPDF(data: ReceiptData): jsPDF {
+  const settings = loadSettings()
+  const primary  = hexToRgb(settings.primaryColor)
+  const doc      = new jsPDF({ unit: 'mm', format: 'a4' })
+  const cur      = settings.currency
+
+  let y = drawHeader(
+    doc,
+    settings.companyName,
+    `Receipt • ${data.date}`,
+    settings,
+  )
+
+  // ── Order reference
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(9)
+  doc.setTextColor(...GRAY_TXT)
+  doc.text(`Order: ${data.orderId}`, MARGIN, y)
+  y += 10
+
+  // ── Summary KPI row
+  const units = data.items.reduce((s, i) => s + i.qty, 0)
+  y = drawSectionHeader(doc, 'Summary', y, primary)
+  y = drawKPIRow(doc, [
+    { label: 'Date',           value: data.date },
+    { label: 'Total Items',    value: String(units) },
+    { label: `Total (${cur})`, value: `${cur} ${data.total.toLocaleString()}` },
+  ], y)
+  y += 4
+
+  // ── Line items table
+  y = drawSectionHeader(doc, 'Items', y, primary)
+  autoTable(doc, {
+    startY: y,
+    head: [['Product', 'SKU', 'Qty', `Unit Price (${cur})`, `Amount (${cur})`]],
+    body: data.items.map((i) => [
+      i.name,
+      i.sku ?? '—',
+      String(i.qty),
+      i.unitPrice.toLocaleString(),
+      (i.qty * i.unitPrice).toLocaleString(),
+    ]),
+    foot: [['', '', '', 'TOTAL', `${cur} ${data.total.toLocaleString()}`]],
+    footStyles: { fontStyle: 'bold', fillColor: primary, textColor: WHITE },
+    headStyles: { fillColor: primary, textColor: WHITE, fontSize: 9 },
+    bodyStyles: { fontSize: 9 },
+    columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
+    margin: { left: MARGIN, right: MARGIN },
+  })
 
   addFooters(doc, settings)
   return doc

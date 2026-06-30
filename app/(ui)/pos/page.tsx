@@ -6,7 +6,7 @@ import { BrandPicker } from '@/components/pos/BrandPicker'
 import { CategoryPicker } from '@/components/pos/CategoryPicker'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Select from '@radix-ui/react-select'
-import { AlertCircle, ChevronDown, Eye, FileText, ImageOff, Minus, Plus, Search, ShoppingCart, Trash2, WifiOff, X } from 'lucide-react'
+import { AlertCircle, ChevronDown, Eye, FileText, ImageOff, Minus, Plus, Printer, Search, ShoppingCart, Trash2, WifiOff, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { createMany as createManyTransactions } from '@/lib/db/transactions'
 import { pushMany, drain } from '@/lib/db/syncQueue'
@@ -29,7 +29,7 @@ type CartItem = Product & { qty: number; unitPrice: number }
 
 interface QuoteForm {
   customerName: string
-  customerEmail: string
+  customerPhone: string
   note: string
 }
 
@@ -55,7 +55,7 @@ export default function POSPage() {
   const [receipt, setReceipt] = useState<{ orderId: string; items: CartItem[]; total: number } | null>(null)
   const [checking, setChecking] = useState(false)
   const [quoteOpen, setQuoteOpen] = useState(false)
-  const [quoteForm, setQuoteForm] = useState<QuoteForm>({ customerName: '', customerEmail: '', note: '' })
+  const [quoteForm, setQuoteForm] = useState<QuoteForm>({ customerName: '', customerPhone: '', note: '' })
   const [quoteSending, setQuoteSending] = useState(false)
   // Incident modal
   const [incidentOpen, setIncidentOpen] = useState(false)
@@ -414,18 +414,48 @@ export default function POSPage() {
     }
   }
 
-  async function handleGenerateQuote() {
+  async function buildReceiptDoc() {
+    if (!receipt) return null
+    const { generateReceiptPDF } = await import('@/lib/pdf')
+    return generateReceiptPDF({
+      orderId: receipt.orderId,
+      total: receipt.total,
+      date: new Date().toLocaleDateString('en-KE', { year: 'numeric', month: 'long', day: 'numeric' }),
+      items: receipt.items.map((i) => ({
+        name: i.name,
+        sku: i.sku,
+        qty: i.qty,
+        unitPrice: i.unitPrice,
+      })),
+    })
+  }
+
+  async function handleDownloadReceipt() {
+    const doc = await buildReceiptDoc()
+    if (!doc || !receipt) return
+    doc.save(`receipt-${receipt.orderId}.pdf`)
+    toast.success('Receipt downloaded')
+  }
+
+  async function handlePrintReceipt() {
+    const doc = await buildReceiptDoc()
+    if (!doc) return
+    const { printPDF } = await import('@/lib/pdf')
+    printPDF(doc)
+  }
+
+  async function handleGenerateQuote(mode: 'download' | 'print' = 'download') {
     if (!quoteForm.customerName.trim()) {
       toast.error('Customer name is required')
       return
     }
     setQuoteSending(true)
     try {
-      const { generateQuotationPDF } = await import('@/lib/pdf')
+      const { generateQuotationPDF, printPDF } = await import('@/lib/pdf')
       const quoteRef = `QT-${Date.now().toString(36).toUpperCase()}`
       const doc = generateQuotationPDF({
         customerName: quoteForm.customerName,
-        customerEmail: quoteForm.customerEmail || undefined,
+        customerPhone: quoteForm.customerPhone || undefined,
         note: quoteForm.note || undefined,
         quoteRef,
         date: new Date().toLocaleDateString('en-KE', { year: 'numeric', month: 'long', day: 'numeric' }),
@@ -439,10 +469,15 @@ export default function POSPage() {
           unitPrice: i.unitPrice,
         })),
       })
-      doc.save(`quotation-${quoteRef}.pdf`)
-      toast.success('Quotation downloaded', { description: `Ref: ${quoteRef}` })
+      if (mode === 'print') {
+        printPDF(doc)
+        toast.success('Sent to printer', { description: `Ref: ${quoteRef}` })
+      } else {
+        doc.save(`quotation-${quoteRef}.pdf`)
+        toast.success('Quotation downloaded', { description: `Ref: ${quoteRef}` })
+      }
       setQuoteOpen(false)
-      setQuoteForm({ customerName: '', customerEmail: '', note: '' })
+      setQuoteForm({ customerName: '', customerPhone: '', note: '' })
     } finally {
       setQuoteSending(false)
     }
@@ -913,9 +948,25 @@ export default function POSPage() {
                   <span>Total</span>
                   <span>KES {receipt.total.toLocaleString()}</span>
                 </div>
-                <Dialog.Close asChild>
-                  <button className="mt-5 w-full py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors">Done</button>
-                </Dialog.Close>
+                <div className="grid grid-cols-2 gap-2 mt-5">
+                  <button
+                    onClick={handlePrintReceipt}
+                    className="border border-gray-300 py-2.5 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    <Printer size={14} />
+                    Print
+                  </button>
+                  <button
+                    onClick={handleDownloadReceipt}
+                    className="border border-gray-300 py-2.5 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    <FileText size={14} />
+                    Download
+                  </button>
+                  <Dialog.Close asChild>
+                    <button className="col-span-2 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors">Done</button>
+                  </Dialog.Close>
+                </div>
               </>
             )}
           </Dialog.Content>
@@ -945,12 +996,12 @@ export default function POSPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Customer Email (optional)</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Customer Phone (optional)</label>
                 <input
-                  type="email"
-                  value={quoteForm.customerEmail}
-                  onChange={(e) => setQuoteForm((f) => ({ ...f, customerEmail: e.target.value }))}
-                  placeholder="customer@email.com"
+                  type="tel"
+                  value={quoteForm.customerPhone}
+                  onChange={(e) => setQuoteForm((f) => ({ ...f, customerPhone: e.target.value }))}
+                  placeholder="e.g. 0712 345 678"
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -982,12 +1033,20 @@ export default function POSPage() {
                 <button className="flex-1 border border-gray-300 py-2.5 rounded-xl text-sm text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
               </Dialog.Close>
               <button
-                onClick={handleGenerateQuote}
+                onClick={() => handleGenerateQuote('print')}
+                disabled={quoteSending}
+                className="flex-1 border border-blue-600 text-blue-600 py-2.5 rounded-xl text-sm font-medium hover:bg-blue-50 disabled:opacity-40 transition-colors flex items-center justify-center gap-1.5"
+              >
+                <Printer size={14} />
+                {quoteSending ? '…' : 'Print'}
+              </button>
+              <button
+                onClick={() => handleGenerateQuote('download')}
                 disabled={quoteSending}
                 className="flex-1 bg-blue-600 text-white py-2.5 rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-40 transition-colors flex items-center justify-center gap-1.5"
               >
                 <FileText size={14} />
-                {quoteSending ? 'Generating…' : 'Download PDF'}
+                {quoteSending ? '…' : 'Download'}
               </button>
             </div>
           </Dialog.Content>
