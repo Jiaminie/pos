@@ -9,7 +9,9 @@ import * as Select from '@radix-ui/react-select'
 import { AlertCircle, ChevronDown, Eye, FileText, ImageOff, Minus, Plus, Printer, Search, ShoppingCart, Trash2, WifiOff, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { createMany as createManyTransactions } from '@/lib/db/transactions'
-import { pushMany, drain } from '@/lib/db/syncQueue'
+import { drain } from '@/lib/db/syncQueue'
+import { create as createSale, type Sale } from '@/lib/db/sales'
+import { push as pushSale, drain as drainSales } from '@/lib/db/salesSyncQueue'
 import { getAll as getProducts } from '@/lib/db/products'
 import { getAll as getCategories } from '@/lib/db/categories'
 import { normalizeQuery } from '@/lib/normalize'
@@ -23,7 +25,10 @@ import { getDeviceId } from '@/lib/device'
 import { INCIDENT_REASON_LABELS } from '@/lib/types'
 import { fetchSettings, type PosLookupMode } from '@/lib/settings'
 import { canDiscount, clampUnitPrice, DEFAULT_MIN_MARKUP_PERCENT, discountPerUnit, effectiveLowestPrice } from '@/lib/pricing'
-import type { Product, ProductCategory, InventoryTransaction, IncidentReason } from '@/lib/types'
+import { applyCartDiscount, maxCartDiscount } from '@/lib/pricing-cart'
+import { getCachedAuthUser } from '@/lib/auth'
+import { getMyBranchId } from '@/lib/branch'
+import type { Product, ProductCategory, InventoryTransaction, IncidentReason, SaleLine } from '@/lib/types'
 
 type CartItem = Product & { qty: number; unitPrice: number }
 
@@ -65,6 +70,8 @@ export default function POSPage() {
   const [minMarkupPercent, setMinMarkupPercent] = useState(DEFAULT_MIN_MARKUP_PERCENT)
   const [posLookupMode, setPosLookupMode] = useState<PosLookupMode>('catalog')
   const [discountEditId, setDiscountEditId] = useState<string | null>(null)
+  const [cartDiscountInput, setCartDiscountInput] = useState('')
+  const [cartDiscountApplied, setCartDiscountApplied] = useState(0)
   const alertedIds = useRef<Set<string>>(new Set())
   const skipCartPersist = useRef(true)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -96,13 +103,14 @@ export default function POSPage() {
   }, [cart])
 
   useEffect(() => {
-    const onOnline = () => { setOffline(false); drain().catch(() => {}); drainIncident().catch(() => {}) }
+    const onOnline = () => { setOffline(false); drain().catch(() => {}); drainIncident().catch(() => {}); drainSales().catch(() => {}) }
     const onOffline = () => setOffline(true)
     queueMicrotask(() => setOffline(!navigator.onLine))
     window.addEventListener('online', onOnline)
     window.addEventListener('offline', onOffline)
     drain().catch(() => {})
     drainIncident().catch(() => {})
+    drainSales().catch(() => {})
     return () => {
       window.removeEventListener('online', onOnline)
       window.removeEventListener('offline', onOffline)
@@ -351,33 +359,108 @@ export default function POSPage() {
     ))
   }
 
+  function applyCartDiscountAmount(raw: string) {
+    const requested = parseFloat(raw)
+    if (isNaN(requested) || requested <= 0) {
+      setCartDiscountApplied(0)
+      setCartDiscountInput('')
+      return
+    }
+    const cartLines = cart.map((item) => ({
+      sellingPrice: item.sellingPrice,
+      costPrice: item.costPrice,
+      lowestPrice: item.lowestPrice,
+      unitPrice: item.unitPrice,
+      qty: item.qty,
+    }))
+    const maxAllowed = maxCartDiscount(cartLines, minMarkupPercent)
+    const { lines, applied } = applyCartDiscount(cartLines, requested, minMarkupPercent)
+    if (requested > maxAllowed) {
+      toast.warning(`Max discount: KES ${Math.round(maxAllowed).toLocaleString()}`)
+    }
+    setCart((prev) => prev.map((item, i) => ({ ...item, unitPrice: lines[i].unitPrice })))
+    setCartDiscountApplied(applied)
+    setCartDiscountInput(String(Math.round(applied)))
+  }
+
   const subtotal = cart.reduce((sum, i) => sum + i.unitPrice * i.qty, 0)
   const listTotal = cart.reduce((sum, i) => sum + i.sellingPrice * i.qty, 0)
-  const totalDiscount = listTotal - subtotal
+  const lineDiscountTotal = listTotal - subtotal
+  const totalDiscount = lineDiscountTotal
+  const maxCartDisc = cart.length > 0
+    ? maxCartDiscount(cart.map((item) => ({
+        sellingPrice: item.sellingPrice,
+        costPrice: item.costPrice,
+        lowestPrice: item.lowestPrice,
+        unitPrice: item.unitPrice,
+        qty: item.qty,
+      })), minMarkupPercent)
+    : 0
   const discountEditItem = discountEditId ? cart.find((i) => i.id === discountEditId) ?? null : null
 
   async function checkout() {
     setChecking(true)
-    const orderId = crypto.randomUUID()
+    const auth = getCachedAuthUser()
+    const branchId = getMyBranchId()
+    if (!auth || !branchId) {
+      toast.error('Not signed in')
+      setChecking(false)
+      return
+    }
+
+    const saleId = crypto.randomUUID()
     const now = new Date().toISOString()
-    const newTxs: InventoryTransaction[] = cart.map((item) => ({
-        id: crypto.randomUUID(),
-        type: 'SALE',
-        productId: item.id,
-        quantity: item.qty,
-        unitPrice: item.unitPrice,
-        orderId,
-        createdAt: now,
-      }))
+    const deviceId = getDeviceId()
+
+    const lines: SaleLine[] = cart.map((item) => ({
+      id: crypto.randomUUID(),
+      productId: item.id,
+      quantity: item.qty,
+      unitPrice: item.unitPrice,
+      originalUnitPrice: item.sellingPrice,
+      lineDiscountAmount: discountPerUnit(item.sellingPrice, item.unitPrice) * item.qty,
+    }))
+
+    const sale: Sale = {
+      id: saleId,
+      branchId,
+      deviceId,
+      cashierId: auth.userId,
+      subtotal: listTotal,
+      lineDiscountTotal,
+      saleDiscountAmount: cartDiscountApplied,
+      total: subtotal - cartDiscountApplied,
+      createdAt: now,
+      lines,
+    }
+
+    const newTxs: InventoryTransaction[] = lines.map((line) => ({
+      id: line.id,
+      type: 'SALE',
+      productId: line.productId,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      originalUnitPrice: line.originalUnitPrice,
+      lineDiscountAmount: line.lineDiscountAmount,
+      saleId,
+      orderId: saleId,
+      branchId,
+      createdAt: now,
+    }))
+
+    await createSale(sale)
+    await pushSale(sale)
     await createManyTransactions(newTxs)
-    await pushMany(newTxs)
 
     const updatedTxs = [...allTransactions, ...newTxs]
     setAllTransactions(updatedTxs)
-    setReceipt({ orderId, items: [...cart], total: subtotal })
+    setReceipt({ orderId: saleId, items: [...cart], total: sale.total })
     setCart([])
+    setCartDiscountInput('')
+    setCartDiscountApplied(0)
     localStorage.removeItem('pos_cart')
     setChecking(false)
+    drainSales().catch(() => {})
     drain().catch(() => {})
 
     const updatedStockByProductId = buildStockByProductId(products, updatedTxs)
@@ -796,9 +879,24 @@ export default function POSPage() {
               </div>
             </>
           )}
+          {cart.length > 0 && maxCartDisc > 0 && (
+            <div className="space-y-1">
+              <label className="text-xs text-gray-500">Cart discount (KES)</label>
+              <input
+                type="number"
+                min={0}
+                max={maxCartDisc}
+                value={cartDiscountInput}
+                onChange={(e) => setCartDiscountInput(e.target.value)}
+                onBlur={() => applyCartDiscountAmount(cartDiscountInput)}
+                placeholder={`Max ${Math.round(maxCartDisc).toLocaleString()}`}
+                className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+          )}
           <div className="flex justify-between text-sm font-semibold">
-            <span>Subtotal</span>
-            <span>KES {subtotal.toLocaleString()}</span>
+            <span>Total</span>
+            <span>KES {(subtotal - cartDiscountApplied).toLocaleString()}</span>
           </div>
           <div className="flex gap-2">
             <button

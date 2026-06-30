@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { v2 as cloudinary } from "cloudinary";
+import { requireUser, isAuthUser, requireUserWithPermission } from "@/lib/server/auth/guard";
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -11,6 +12,9 @@ const MAX_SIZE = 2 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 export async function POST(request: NextRequest) {
+  const user = await requireUserWithPermission(request, 'catalog.product.manage');
+  if (!isAuthUser(user)) return user;
+
   try {
     const formData = await request.formData();
     const file = formData.get("file");

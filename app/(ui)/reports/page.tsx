@@ -16,6 +16,7 @@ import { getBrandOptions, getProductBrand, matchesProductSearch } from '@/lib/br
 import { barcodeSearchEnabled } from '@/lib/product-search'
 import { normalizeQuery } from '@/lib/normalize'
 import { fetchSettings, type PosLookupMode } from '@/lib/settings'
+import { canViewReports, fetchMe } from '@/lib/auth'
 import { getMyBranchId } from '@/lib/branch'
 import { INCIDENT_REASON_LABELS } from '@/lib/types'
 import type { InventoryTransaction, Product, ProductCategory, Incident } from '@/lib/types'
@@ -139,6 +140,12 @@ export default function ReportsPage() {
   const [lowStockOpen, setLowStockOpen] = useState(false)
   const [missedOpen, setMissedOpen] = useState(false)
   const [abcOpen, setAbcOpen] = useState(true)
+  const [discountOpen, setDiscountOpen] = useState(false)
+  const [discountData, setDiscountData] = useState<{
+    saleCount?: number
+    cashierStats: Array<{ cashierId: string; name: string; count: number; discountTotal: number; revenue: number; avgDiscountPct: number }>
+    discountedLines: Array<{ saleId: string; createdAt: string; cashierName: string; productName: string; lineDiscount: number }>
+  } | null>(null)
   const [posLookupMode, setPosLookupMode] = useState<PosLookupMode>('catalog')
   const myBranchId = getMyBranchId()
   const PAGE_SIZE = 25
@@ -171,6 +178,20 @@ export default function ReportsPage() {
     }
     load()
     fetchSettings().then((s) => setPosLookupMode(s.posLookupMode)).catch(() => {})
+    fetchMe().then((u) => {
+      if (u && canViewReports(u)) {
+        const fromIso = customFrom
+        const toIso = customTo
+        const qs = new URLSearchParams()
+        if (fromIso) qs.set('from', fromIso)
+        if (toIso) qs.set('to', toIso)
+        if (myBranchId && u.role === 'MANAGER') qs.set('branchId', myBranchId)
+        fetch(`/api/reports/discounts?${qs}`, { cache: 'no-store' })
+          .then((r) => r.json())
+          .then(({ data }) => { if (data) setDiscountData(data) })
+          .catch(() => {})
+      }
+    })
   }, [])
 
   const includeBarcodeSearch = barcodeSearchEnabled(posLookupMode)
@@ -707,6 +728,60 @@ export default function ReportsPage() {
               ))}
               {heatspots.length > 8 && (
                 <p className="text-xs text-gray-500">+ {heatspots.length - 8} more products</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Discount accountability */}
+      {discountData && discountData.cashierStats.length > 0 && (
+        <div className="mb-4 border border-amber-200 rounded-xl overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setDiscountOpen((o) => !o)}
+            className="w-full flex items-center gap-2 px-4 py-3 text-left bg-amber-50 hover:bg-amber-100/50 transition-colors"
+          >
+            <ChevronDown size={16} className={`text-amber-700 shrink-0 transition-transform ${discountOpen ? 'rotate-180' : ''}`} />
+            <span className="text-sm font-medium text-amber-900 flex-1">Discounts by cashier</span>
+            <span className="text-xs text-amber-700">{discountData.saleCount ?? discountData.cashierStats.reduce((s, c) => s + c.count, 0)} sales</span>
+          </button>
+          {discountOpen && (
+            <div className="border-t border-amber-200 bg-white px-4 py-3 space-y-4">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-gray-500 uppercase">
+                    <th className="text-left py-1">Cashier</th>
+                    <th className="text-right py-1">Sales</th>
+                    <th className="text-right py-1">Discount (KES)</th>
+                    <th className="text-right py-1">Avg %</th>
+                    <th className="text-right py-1">Revenue</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {discountData.cashierStats.map((c) => (
+                    <tr key={c.cashierId}>
+                      <td className="py-1.5 font-medium">{c.name}</td>
+                      <td className="py-1.5 text-right">{c.count}</td>
+                      <td className="py-1.5 text-right text-amber-600">{Math.round(c.discountTotal).toLocaleString()}</td>
+                      <td className="py-1.5 text-right">{c.avgDiscountPct}%</td>
+                      <td className="py-1.5 text-right">{Math.round(c.revenue).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {discountData.discountedLines.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-gray-600 mb-2">Below-list sales</p>
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {discountData.discountedLines.slice(0, 20).map((line, i) => (
+                      <div key={`${line.saleId}-${i}`} className="flex justify-between text-xs gap-2">
+                        <span className="truncate">{line.productName} · {line.cashierName}</span>
+                        <span className="text-amber-600 shrink-0">−{Math.round(line.lineDiscount).toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           )}

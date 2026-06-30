@@ -637,8 +637,8 @@ function drawStockMovement(doc: jsPDF, abc: ABCAnalysis, y: number, primary: RGB
   return y
 }
 
-export function generateCOBReportPDF(data: COBReportData): jsPDF {
-  const settings = loadSettings()
+export function generateCOBReportPDF(data: COBReportData, settingsOverride?: PDFSettings): jsPDF {
+  const settings = settingsOverride ?? loadSettings()
   const primary  = hexToRgb(settings.primaryColor)
   const cur      = settings.currency
   const doc      = new jsPDF({ unit: 'mm', format: 'a4' })

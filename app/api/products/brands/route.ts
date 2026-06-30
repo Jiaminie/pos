@@ -1,6 +1,10 @@
 import { prisma } from "@/lib/server/db";
+import { requireUser, isAuthUser } from "@/lib/server/auth/guard";
 
 export async function GET() {
+  const user = await requireUser();
+  if (!isAuthUser(user)) return user;
+
   try {
     const rows = await prisma.product.findMany({
       where: { brand: { not: "" } },

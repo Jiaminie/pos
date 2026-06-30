@@ -1,10 +1,14 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/server/db'
+import { requireUser, isAuthUser, requireUserWithPermission } from '@/lib/server/auth/guard'
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const user = await requireUserWithPermission(request, 'admin.branch.manage')
+  if (!isAuthUser(user)) return user
+
   try {
     const { id } = await params
     const body = await request.json()

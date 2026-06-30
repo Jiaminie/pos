@@ -1,7 +1,11 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/server/db'
+import { requireUser, isAuthUser, requireUserWithPermission } from '@/lib/server/auth/guard'
 
 export async function GET() {
+  const user = await requireUser()
+  if (!isAuthUser(user)) return user
+
   try {
     const units = await prisma.unit.findMany({ orderBy: { code: 'asc' } })
     return Response.json(
@@ -15,6 +19,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const user = await requireUserWithPermission(request, 'catalog.taxonomy.manage')
+  if (!isAuthUser(user)) return user
+
   try {
     const body = await request.json()
     const code = (body.code ?? '').toString().trim().toUpperCase()

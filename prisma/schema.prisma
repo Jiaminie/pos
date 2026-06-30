@@ -6,17 +6,39 @@ datasource db {
   provider = "postgresql"
 }
 
+enum Role {
+  OWNER
+  MANAGER
+  CASHIER
+}
+
 model Organization {
   id        String   @id @default(uuid())
   name      String
   country   String   @default("KE")
   createdAt DateTime @default(now()) @map("created_at")
 
-  branches Branch[]
-  products Product[]
-  settings StoreSettings?
+  branches        Branch[]
+  products        Product[]
+  settings        StoreSettings?
+  users           User[]
+  rolePermissions RolePermission[]
 
   @@map("organizations")
+}
+
+model RolePermission {
+  id             String   @id @default(uuid())
+  organizationId String   @map("organization_id")
+  role           Role
+  permission     String
+  granted        Boolean  @default(false)
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, role, permission])
+  @@map("role_permissions")
 }
 
 model Branch {
@@ -33,9 +55,81 @@ model Branch {
   devices       Device[]
   transfersFrom StockTransfer[]        @relation("TransferFrom")
   transfersTo   StockTransfer[]        @relation("TransferTo")
+  users         User[]
+  sales         Sale[]
 
   @@unique([organizationId, code])
   @@map("branches")
+}
+
+model User {
+  id             String   @id @default(uuid())
+  name           String
+  pinHash        String   @map("pin_hash")
+  role           Role
+  organizationId String   @map("organization_id")
+  branchId       String?  @map("branch_id")
+  active         Boolean  @default(true)
+  createdById    String?  @map("created_by_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  branch       Branch?      @relation(fields: [branchId], references: [id])
+  createdBy    User?        @relation("UserCreatedBy", fields: [createdById], references: [id])
+  created      User[]       @relation("UserCreatedBy")
+  sales        Sale[]
+
+  @@index([organizationId])
+  @@index([branchId])
+  @@map("users")
+}
+
+model Sale {
+  id                 String    @id
+  organizationId     String    @map("organization_id")
+  branchId           String    @map("branch_id")
+  deviceId           String    @map("device_id")
+  cashierId          String    @map("cashier_id")
+  subtotal           Decimal
+  lineDiscountTotal  Decimal   @default(0) @map("line_discount_total")
+  saleDiscountAmount Decimal   @default(0) @map("sale_discount_amount")
+  total              Decimal
+  createdAt          DateTime  @default(now()) @map("created_at")
+  syncedAt           DateTime? @map("synced_at")
+  voidedAt           DateTime? @map("voided_at")
+  voidedById         String?   @map("voided_by_id")
+  voidReason         String?   @map("void_reason")
+
+  branch  Branch                 @relation(fields: [branchId], references: [id])
+  cashier User                   @relation(fields: [cashierId], references: [id])
+  lines   InventoryTransaction[]
+
+  @@index([branchId])
+  @@index([cashierId])
+  @@index([createdAt])
+  @@map("sales")
+}
+
+model AuditEvent {
+  id             String   @id @default(uuid())
+  organizationId String   @map("organization_id")
+  branchId       String?  @map("branch_id")
+  actorId        String   @map("actor_id")
+  actorName      String   @map("actor_name")
+  approvedById   String?  @map("approved_by_id")
+  action         String
+  targetType     String?  @map("target_type")
+  targetId       String?  @map("target_id")
+  metadata       Json?
+  deviceId       String?  @map("device_id")
+  wasOffline     Boolean  @default(false) @map("was_offline")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([organizationId, createdAt])
+  @@index([branchId, createdAt])
+  @@index([actorId])
+  @@index([action])
+  @@map("audit_events")
 }
 
 enum TransferStatus {
@@ -123,22 +217,27 @@ enum TransactionSource {
 }
 
 model InventoryTransaction {
-  id             String             @id @default(uuid())
-  productId      String             @map("product_id")
-  type           TransactionType
-  source         TransactionSource? @map("source")
-  sourceBranchId String?            @map("source_branch_id")
-  branchId       String?            @map("branch_id")
-  quantity       Decimal
-  unitPrice      Decimal?           @map("unit_price")
-  deviceId       String             @map("device_id")
-  createdAt      DateTime           @default(now()) @map("created_at")
-  syncedAt       DateTime?          @map("synced_at")
+  id                 String             @id @default(uuid())
+  productId          String             @map("product_id")
+  type               TransactionType
+  source             TransactionSource? @map("source")
+  sourceBranchId     String?            @map("source_branch_id")
+  branchId           String?            @map("branch_id")
+  quantity           Decimal
+  unitPrice          Decimal?           @map("unit_price")
+  saleId             String?            @map("sale_id")
+  originalUnitPrice  Decimal?           @map("original_unit_price")
+  lineDiscountAmount Decimal?           @map("line_discount_amount")
+  deviceId           String             @map("device_id")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  syncedAt           DateTime?          @map("synced_at")
 
   product Product @relation(fields: [productId], references: [id])
   branch  Branch? @relation(fields: [branchId], references: [id])
+  sale    Sale?   @relation(fields: [saleId], references: [id])
 
   @@index([branchId])
+  @@index([saleId])
   @@map("inventory_transactions")
 }
 

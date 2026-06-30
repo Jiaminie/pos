@@ -1,7 +1,11 @@
 import { createCatalogBackup } from '@/lib/import/backup'
 import { importLog } from '@/lib/import/logger'
+import { requireUser, isAuthUser, requireUserWithPermission } from '@/lib/server/auth/guard'
 
 export async function POST() {
+  const user = await requireUserWithPermission(undefined, 'catalog.product.manage')
+  if (!isAuthUser(user)) return user
+
   try {
     importLog('Backup requested', 'backup')
     const started = Date.now()

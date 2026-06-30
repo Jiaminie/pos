@@ -1,9 +1,13 @@
 import { prisma } from '@/lib/server/db'
 import { defaultPosLookupMode, parsePosLookupMode, parseReceiptFormat } from '@/lib/settings'
+import { requireUser, isAuthUser, requireUserWithPermission } from '@/lib/server/auth/guard'
 
 const SINGLETON_ID = 'singleton'
 
 export async function GET() {
+  const user = await requireUser()
+  if (!isAuthUser(user)) return user
+
   try {
     const settings = await prisma.storeSettings.upsert({
       where: { id: SINGLETON_ID },
@@ -18,6 +22,9 @@ export async function GET() {
 }
 
 export async function PATCH(req: Request) {
+  const user = await requireUserWithPermission(undefined, 'admin.settings')
+  if (!isAuthUser(user)) return user
+
   try {
     const body = await req.json()
     const { companyName, tagline, logoDataUrl, primaryColor, currency, footerText, minMarkupPercent, posLookupMode, receiptFormat, receiptTitle } = body

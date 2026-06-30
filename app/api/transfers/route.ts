@@ -1,7 +1,13 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/server/db'
+import { requireUser, isAuthUser, assertBranchAccess, requirePermission, requireUserWithPermission } from '@/lib/server/auth/guard'
 
 export async function GET(request: NextRequest) {
+  const user = await requireUser(request)
+  if (!isAuthUser(user)) return user
+  const denied = await requirePermission(user, 'stock.view')
+  if (!isAuthUser(denied)) return denied
+
   try {
     const { searchParams } = new URL(request.url)
     const branchId  = searchParams.get('branchId')
@@ -11,6 +17,9 @@ export async function GET(request: NextRequest) {
     if (!branchId) {
       return Response.json({ data: null, error: 'branchId is required' }, { status: 400 })
     }
+
+    const branchErr = assertBranchAccess(user, branchId)
+    if (branchErr) return branchErr
 
     const where = {
       ...(direction === 'incoming' ? { toBranchId: branchId }   : {}),
@@ -33,6 +42,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const user = await requireUserWithPermission(request, 'stock.transfer.initiate')
+  if (!isAuthUser(user)) return user
+
   try {
     const body = await request.json()
     const { fromBranchId, toBranchId, productId, quantity, note, fromDeviceId } = body
@@ -43,6 +55,9 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       )
     }
+
+    const branchErr = assertBranchAccess(user, fromBranchId)
+    if (branchErr) return branchErr
 
     if (fromBranchId === toBranchId) {
       return Response.json(

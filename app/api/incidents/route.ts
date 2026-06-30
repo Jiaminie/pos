@@ -1,10 +1,14 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/server/db";
+import { requireUser, isAuthUser, requireUserWithPermission } from "@/lib/server/auth/guard";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
 export async function GET(request: NextRequest) {
+  const user = await requireUser(request);
+  if (!isAuthUser(user)) return user;
+
   try {
     const { searchParams } = new URL(request.url);
     const limit = Math.min(
@@ -53,6 +57,9 @@ type IncomingIncident = {
 };
 
 export async function POST(request: NextRequest) {
+  const user = await requireUserWithPermission(request, 'incident.create');
+  if (!isAuthUser(user)) return user;
+
   try {
     const body = await request.json();
 

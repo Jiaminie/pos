@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/server/db'
+import { requireUser, isAuthUser, assertBranchAccess } from '@/lib/server/auth/guard'
 
 type IncomingTransaction = {
   id?: string
@@ -15,6 +16,9 @@ type IncomingTransaction = {
 }
 
 export async function POST(request: NextRequest) {
+  const user = await requireUser(request)
+  if (!isAuthUser(user)) return user
+
   try {
     const body = await request.json()
 
@@ -26,6 +30,14 @@ export async function POST(request: NextRequest) {
     }
 
     const incoming: IncomingTransaction[] = body
+
+    for (const tx of incoming) {
+      if (tx.branchId) {
+        const err = assertBranchAccess(user, tx.branchId)
+        if (err) return err
+      }
+    }
+
     const syncedAt = new Date()
 
     const created = await prisma.$transaction(

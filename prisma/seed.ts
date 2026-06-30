@@ -1,9 +1,10 @@
 import "dotenv/config";
-import { PrismaClient } from '../app/generated/prisma/client'
+import { PrismaClient } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
+import { hashPin } from '../lib/server/auth/pin'
+import { seedRolePermissions } from '../lib/server/auth/permissions'
 
 function resolveConnectionString(url: string): string {
-  // prisma+postgres:// URLs embed the real connection string in the api_key param
   if (url.startsWith('prisma+postgres://')) {
     const apiKey = new URL(url).searchParams.get('api_key')!
     return JSON.parse(Buffer.from(apiKey, 'base64').toString()).databaseUrl
@@ -13,6 +14,41 @@ function resolveConnectionString(url: string): string {
 
 const connectionString = resolveConnectionString(process.env.DATABASE_URL!)
 const prisma = new PrismaClient({ adapter: new PrismaPg(connectionString) })
+
+async function seedOwner() {
+  const ownerPin = process.env.OWNER_PIN ?? '123456'
+  if (!process.env.OWNER_PIN) {
+    console.warn('⚠ OWNER_PIN not set — using default PIN 123456 (dev only)')
+  }
+
+  const org = await prisma.organization.findFirst({ orderBy: { createdAt: 'asc' } })
+  if (!org) {
+    console.warn('No organization found — skip owner seed')
+    return
+  }
+
+  const existing = await prisma.user.findFirst({
+    where: { organizationId: org.id, role: 'OWNER' },
+  })
+  if (existing) {
+    console.log(`Owner already exists: ${existing.name}`)
+    return
+  }
+
+  const pinHash = await hashPin(ownerPin)
+  const owner = await prisma.user.create({
+    data: {
+      name: 'Owner',
+      pinHash,
+      role: 'OWNER',
+      organizationId: org.id,
+      branchId: null,
+    },
+  })
+  console.log(`Created owner user: ${owner.name} (id: ${owner.id})`)
+  await seedRolePermissions(org.id)
+  console.log('Seeded default role permissions')
+}
 
 const items = [
   // ── Adhesives & Sealants ────────────────────────────────────────────────
@@ -215,6 +251,19 @@ const items = [
 ]
 
 async function main() {
+  await seedOwner()
+
+  const org = await prisma.organization.findFirst({ orderBy: { createdAt: 'asc' } })
+  if (org) {
+    await seedRolePermissions(org.id)
+  }
+
+  const existingProducts = await prisma.product.count()
+  if (existingProducts > 0) {
+    console.log(`Skipping product seed — ${existingProducts} products already exist`)
+    return
+  }
+
   function inferBrandFromName(name: string): string {
     const token = name.trim().split(/\s+/)[0]?.replace(/[^a-zA-Z0-9]/g, '') ?? ''
     return token.length >= 2 ? token.toUpperCase() : 'UNBRANDED'

@@ -1,10 +1,15 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/server/db";
+import { requireUser, isAuthUser, requireUserWithPermission } from "@/lib/server/auth/guard";
+import { hasPermission } from "@/lib/server/auth/permissions";
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 100
 
 export async function GET(request: NextRequest) {
+  const user = await requireUser(request);
+  if (!isAuthUser(user)) return user;
+
   try {
     const { searchParams } = new URL(request.url);
 
@@ -66,9 +71,21 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const user = await requireUserWithPermission(request, 'catalog.product.manage');
+  if (!isAuthUser(user)) return user;
+
   try {
     const body = await request.json();
     const { id, name, sku, barcode, sellingPrice, costPrice, lowestPrice, imageUrl, category, brand, specification, stockUnit, unitId } = body;
+
+    if (sellingPrice !== undefined && sellingPrice !== null) {
+      const ok = await hasPermission(user, 'catalog.price.selling');
+      if (!ok) return Response.json({ data: null, error: 'Forbidden' }, { status: 403 });
+    }
+    if (costPrice !== undefined || lowestPrice !== undefined) {
+      const ok = await hasPermission(user, 'catalog.price.cost_and_floor');
+      if (!ok) return Response.json({ data: null, error: 'Forbidden' }, { status: 403 });
+    }
 
     if (!name || !sku || !brand?.trim() || sellingPrice == null || costPrice == null) {
       return Response.json(
@@ -95,6 +112,7 @@ export async function POST(request: NextRequest) {
         specification: specification ?? null,
         stockUnit: stockUnit ?? null,
         ...(unitId ? { unitId } : {}),
+        organizationId: user.orgId,
       },
       include: { unit: true },
     });

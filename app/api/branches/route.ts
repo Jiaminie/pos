@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/server/db'
+import { requireUser, isAuthUser, requireUserWithPermission } from '@/lib/server/auth/guard'
 
 export async function GET(request: NextRequest) {
   try {
@@ -22,6 +23,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const user = await requireUserWithPermission(request, 'admin.branch.manage')
+  if (!isAuthUser(user)) return user
+
   try {
     const body = await request.json()
     const { organizationId, name, code, address } = body

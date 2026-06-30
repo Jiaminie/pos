@@ -4,8 +4,12 @@ import { parseCsvText, parseWorkbookBuffer } from '@/lib/import/parse'
 import { buildImportPreview } from '@/lib/import/preview'
 import type { ImportPreviewRow, RawImportRow } from '@/lib/import/types'
 import { DEFAULT_STOCK_PRICES_MAPPING } from '@/lib/import/types'
+import { requireUser, isAuthUser, requireUserWithPermission } from '@/lib/server/auth/guard'
 
 export async function POST(request: NextRequest) {
+  const user = await requireUserWithPermission(request, 'catalog.product.manage')
+  if (!isAuthUser(user)) return user
+
   try {
     const contentType = request.headers.get('content-type') ?? ''
     let rawRows: RawImportRow[] = []

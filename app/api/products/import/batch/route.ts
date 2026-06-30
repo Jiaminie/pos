@@ -2,8 +2,12 @@ import { NextRequest } from 'next/server'
 import { commitImportBatch, loadExistingSkuMap } from '@/lib/import/commit'
 import { importLog } from '@/lib/import/logger'
 import type { ImportPreviewRow } from '@/lib/import/types'
+import { requireUser, isAuthUser, requireUserWithPermission } from '@/lib/server/auth/guard'
 
 export async function POST(request: NextRequest) {
+  const user = await requireUserWithPermission(request, 'catalog.product.manage')
+  if (!isAuthUser(user)) return user
+
   try {
     const body = await request.json()
     const rows = body.rows as ImportPreviewRow[] | undefined

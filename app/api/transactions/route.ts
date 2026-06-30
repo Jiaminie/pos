@@ -1,10 +1,16 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/server/db";
+import { requireUser, isAuthUser, assertBranchAccess, requirePermission } from "@/lib/server/auth/guard";
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 100
 
 export async function GET(request: NextRequest) {
+  const user = await requireUser(request);
+  if (!isAuthUser(user)) return user;
+  const denied = await requirePermission(user, 'stock.view');
+  if (!isAuthUser(denied)) return denied;
+
   try {
     const { searchParams } = new URL(request.url);
 
@@ -16,16 +22,15 @@ export async function GET(request: NextRequest) {
     const productId = searchParams.get("productId") ?? undefined;
     const deviceId = searchParams.get("deviceId") ?? undefined;
     const branchId = searchParams.get("branchId") ?? undefined;
-    // slim=1 omits the joined product — used by full-log device sync, where
-    // embedding a product per row would bloat the download enormously.
     const slim = searchParams.get("slim") === "1";
+
+    const scopedBranch = user.role === 'OWNER' ? branchId : (user.branchId ?? branchId);
 
     const transactions = await prisma.inventoryTransaction.findMany({
       where: {
         ...(productId ? { productId } : {}),
         ...(deviceId ? { deviceId } : {}),
-        // Per-branch sync also pulls legacy rows that predate branch tagging.
-        ...(branchId ? { OR: [{ branchId }, { branchId: null }] } : {}),
+        ...(scopedBranch ? { OR: [{ branchId: scopedBranch }, { branchId: null }] } : {}),
       },
       // Total ordering: createdAt is non-unique (imported stock txns use
       // createMany → identical Postgres now() timestamp), so the id cursor
@@ -52,15 +57,38 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const user = await requireUser(request);
+  if (!isAuthUser(user)) return user;
+
   try {
     const body = await request.json();
-    const { productId, type, quantity, unitPrice, deviceId } = body;
+    const { productId, type, quantity, unitPrice, deviceId, branchId } = body;
+
+    const permissionByType: Record<string, 'stock.count.adjust' | 'stock.purchase.receive' | 'sales.create' | 'stock.transfer.initiate' | 'sales.void'> = {
+      ADJUSTMENT: 'stock.count.adjust',
+      PURCHASE: 'stock.purchase.receive',
+      SALE: 'sales.create',
+      TRANSFER_OUT: 'stock.transfer.initiate',
+      RETURN: 'sales.void',
+    }
+    const required = permissionByType[type as string]
+    if (!required) {
+      return Response.json({ data: null, error: 'Invalid transaction type' }, { status: 400 })
+    }
+    const denied = await requirePermission(user, required)
+    if (!isAuthUser(denied)) return denied
 
     if (!productId || !type || quantity == null || !deviceId) {
       return Response.json(
         { data: null, error: "productId, type, quantity, deviceId are required" },
         { status: 400 }
       );
+    }
+
+    const txBranch = branchId ?? user.branchId;
+    if (txBranch) {
+      const branchErr = assertBranchAccess(user, txBranch);
+      if (branchErr) return branchErr;
     }
 
     const transaction = await prisma.inventoryTransaction.create({
@@ -70,6 +98,7 @@ export async function POST(request: NextRequest) {
         quantity,
         unitPrice: unitPrice ?? null,
         deviceId,
+        branchId: txBranch ?? null,
         syncedAt: new Date(),
       },
     });

@@ -1,10 +1,14 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/server/db'
+import { requireUser, isAuthUser, assertBranchAccess, requireUserWithPermission } from '@/lib/server/auth/guard'
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const user = await requireUserWithPermission(request, 'stock.transfer.receive')
+  if (!isAuthUser(user)) return user
+
   try {
     const { id } = await params
     const body = await request.json()
@@ -21,6 +25,9 @@ export async function PATCH(
     if (!transfer) {
       return Response.json({ data: null, error: 'Transfer not found' }, { status: 404 })
     }
+
+    const branchErr = assertBranchAccess(user, transfer.toBranchId)
+    if (branchErr) return branchErr
 
     if (transfer.status !== 'PENDING' && transfer.status !== 'IN_TRANSIT') {
       return Response.json(

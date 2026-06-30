@@ -1,14 +1,28 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/server/db";
+import { requireUser, isAuthUser, requireUserWithPermission } from "@/lib/server/auth/guard";
+import { hasPermission } from "@/lib/server/auth/permissions";
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const user = await requireUserWithPermission(request, 'catalog.product.manage');
+  if (!isAuthUser(user)) return user;
+
   try {
     const { id } = await params;
     const body = await request.json();
     const { name, sku, barcode, sellingPrice, costPrice, lowestPrice, category, brand, specification, stockUnit, imageUrl, unitId } = body;
+
+    if (sellingPrice !== undefined) {
+      const ok = await hasPermission(user, 'catalog.price.selling');
+      if (!ok) return Response.json({ data: null, error: 'Forbidden' }, { status: 403 });
+    }
+    if (costPrice !== undefined || lowestPrice !== undefined) {
+      const ok = await hasPermission(user, 'catalog.price.cost_and_floor');
+      if (!ok) return Response.json({ data: null, error: 'Forbidden' }, { status: 403 });
+    }
 
     // unitId is immutable after creation — reject attempts to change it
     if (unitId !== undefined) {
@@ -44,9 +58,12 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const user = await requireUserWithPermission(request, 'catalog.product.manage');
+  if (!isAuthUser(user)) return user;
+
   try {
     const { id } = await params;
     await prisma.product.delete({ where: { id } });

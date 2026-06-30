@@ -59,6 +59,7 @@ export async function drain(batchSize = 100): Promise<void> {
     const res = await fetch('/api/sync', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body:    JSON.stringify(payload),
     })
 

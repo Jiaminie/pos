@@ -1,5 +1,6 @@
 import { Resend } from 'resend'
 import { LOW_STOCK_THRESHOLD } from '@/lib/stock'
+import { requireUser, isAuthUser } from '@/lib/server/auth/guard'
 
 interface LowStockItem {
   name: string
@@ -8,6 +9,9 @@ interface LowStockItem {
 }
 
 export async function POST(req: Request) {
+  const user = await requireUser()
+  if (!isAuthUser(user)) return user
+
   const resend = new Resend(process.env.RESEND_API_KEY)
   try {
     const { items }: { items: LowStockItem[] } = await req.json()

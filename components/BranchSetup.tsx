@@ -1,9 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Building2, Check, Loader2, MapPin, Star } from 'lucide-react'
+import { Building2, Loader2, MapPin, Star } from 'lucide-react'
 import { setMyBranchId, setMyOrgId } from '@/lib/branch'
-import { replaceCatalogFromServer } from '@/lib/db/seed'
 import type { Branch } from '@/lib/types'
 
 interface Props {
@@ -15,7 +14,6 @@ export function BranchSetup({ onComplete }: Props) {
   const [loading, setLoading]       = useState(true)
   const [selecting, setSelecting]   = useState<string | null>(null)
   const [error, setError]           = useState<string | null>(null)
-  const [syncing, setSyncing]       = useState(false)
 
   useEffect(() => {
     fetch('/api/branches', { cache: 'no-store' })
@@ -32,9 +30,6 @@ export function BranchSetup({ onComplete }: Props) {
     setSelecting(branch.id)
     setMyBranchId(branch.id)
     setMyOrgId(branch.organizationId)
-    setSyncing(true)
-    await replaceCatalogFromServer()
-    setSyncing(false)
     onComplete()
   }
 
@@ -115,20 +110,12 @@ export function BranchSetup({ onComplete }: Props) {
                   )}
                 </div>
                 {isSelecting ? (
-                  syncing
-                    ? <Loader2 size={16} className="animate-spin text-blue-600 shrink-0 mt-0.5" />
-                    : <Check size={16} className="text-blue-600 shrink-0 mt-0.5" />
+                  <Loader2 size={16} className="animate-spin text-blue-600 shrink-0 mt-0.5" />
                 ) : null}
               </button>
             )
           })}
         </div>
-
-        {syncing && (
-          <p className="text-center text-xs text-blue-600 mt-4">
-            Syncing catalog to this device…
-          </p>
-        )}
       </div>
     </div>
   )

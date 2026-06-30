@@ -67,6 +67,26 @@ export type TransactionType = 'SALE' | 'STOCK_IN' | 'ADJUSTMENT' | 'TRANSFER_OUT
 
 export type TransactionSource = 'SUPPLIER' | 'INTERBRANCH' | 'CORRECTION'
 
+export type SaleLine = {
+  id: string
+  productId: string
+  quantity: number
+  unitPrice: number
+  originalUnitPrice: number
+  lineDiscountAmount: number
+}
+
+export type Role = 'OWNER' | 'MANAGER' | 'CASHIER'
+
+export type TeamUser = {
+  id: string
+  name: string
+  role: Role
+  branchId: string | null
+  active: boolean
+  branch?: { id: string; name: string; code: string } | null
+}
+
 export type InventoryTransaction = {
   id: string
   type: TransactionType
@@ -74,6 +94,9 @@ export type InventoryTransaction = {
   quantity: number
   unitPrice?: number
   orderId?: string
+  saleId?: string
+  originalUnitPrice?: number
+  lineDiscountAmount?: number
   source?: TransactionSource | null
   sourceBranchId?: string | null
   branchId?: string

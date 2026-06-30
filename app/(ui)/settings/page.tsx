@@ -1,12 +1,15 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Building2, Check, FileText, GitBranch, Loader2, MapPin, Monitor, Percent, Plus, Receipt, ScanBarcode, Star, Upload, X } from 'lucide-react'
+import { Building2, Check, FileText, GitBranch, Loader2, MapPin, Monitor, Percent, Plus, Receipt, ScanBarcode, Shield, Star, Upload, Users, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { fetchSettings, saveSettings, DEFAULT_SETTINGS, POS_LOOKUP_MODES, RECEIPT_FORMATS, type PDFSettings, type PosLookupMode, type ReceiptFormat } from '@/lib/settings'
 import { getMyBranchId, getMyOrgId, setMyBranchId } from '@/lib/branch'
 import { getAll as getLocalBranches } from '@/lib/db/branches'
 import type { Branch } from '@/lib/types'
+import { TeamSection } from '@/components/settings/TeamSection'
+import { PermissionsSection } from '@/components/settings/PermissionsSection'
+import { fetchMe, canManageTeam, hasPermission } from '@/lib/auth'
 
 const COLORS = [
   { label: 'Blue',   value: '#2563eb' },
@@ -18,7 +21,7 @@ const COLORS = [
   { label: 'Gray',   value: '#374151' },
 ]
 
-type SettingsTab = 'store' | 'pricing' | 'pos' | 'receipts' | 'documents' | 'branches' | 'device'
+type SettingsTab = 'store' | 'pricing' | 'pos' | 'receipts' | 'documents' | 'branches' | 'team' | 'permissions' | 'device'
 
 const TABS: { id: SettingsTab; label: string; description: string; icon: typeof Building2 }[] = [
   { id: 'store',     label: 'Store',     description: 'Name, logo & branding',        icon: Building2 },
@@ -27,6 +30,8 @@ const TABS: { id: SettingsTab; label: string; description: string; icon: typeof 
   { id: 'receipts',  label: 'Receipts',  description: 'Receipt & quotation paper size', icon: Receipt },
   { id: 'documents', label: 'Documents', description: 'PDF reports & quotations',     icon: FileText },
   { id: 'branches',  label: 'Branches',  description: 'Create & manage branches',     icon: GitBranch },
+  { id: 'team',      label: 'Team',      description: 'Staff, roles & PINs',          icon: Users },
+  { id: 'permissions', label: 'Permissions', description: 'Role capability toggles', icon: Shield },
   { id: 'device',    label: 'Device',    description: "This device's branch assignment", icon: Monitor },
 ]
 
@@ -49,6 +54,21 @@ export default function SettingsPage() {
   // Device tab state
   const [deviceBranchId, setDeviceBranchId] = useState<string | null>(null)
   const [deviceChanging, setDeviceChanging]  = useState(false)
+  const [showTeamTab, setShowTeamTab] = useState(false)
+  const [showPermissionsTab, setShowPermissionsTab] = useState(false)
+
+  function tabVisible(t: (typeof TABS)[number]) {
+    if (t.id === 'team' && !showTeamTab) return false
+    if (t.id === 'permissions' && !showPermissionsTab) return false
+    return true
+  }
+
+  useEffect(() => {
+    fetchMe().then((u) => {
+      setShowTeamTab(!!u && canManageTeam(u))
+      setShowPermissionsTab(!!u && hasPermission(u, 'admin.permissions.configure'))
+    })
+  }, [])
 
   useEffect(() => {
     fetchSettings().then((s) => { setSettings(s); setLoading(false) })
@@ -56,8 +76,7 @@ export default function SettingsPage() {
   }, [])
 
   useEffect(() => {
-    if (activeTab === 'branches' && branches.length === 0) loadBranches()
-    if (activeTab === 'device'   && branches.length === 0) loadBranches()
+    if ((activeTab === 'branches' || activeTab === 'team' || activeTab === 'device') && branches.length === 0) loadBranches()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
 
@@ -222,7 +241,7 @@ export default function SettingsPage() {
           <p className="text-xs text-gray-500 mt-1">Manage your store</p>
         </div>
         <nav className="flex-1 p-3 space-y-0.5">
-          {TABS.map(({ id, label, description, icon: Icon }) => {
+          {TABS.filter(tabVisible).map(({ id, label, description, icon: Icon }) => {
             const active = activeTab === id
             return (
               <button
@@ -258,7 +277,7 @@ export default function SettingsPage() {
               <p className="text-xs text-gray-500 mt-0.5">Manage your store</p>
             </div>
             <nav className="flex gap-1 overflow-x-auto pb-1 lg:hidden scrollbar-none">
-              {TABS.map(({ id, label, icon: Icon }) => {
+              {TABS.filter(tabVisible).map(({ id, label, icon: Icon }) => {
                 const active = activeTab === id
                 return (
                   <button
@@ -297,7 +316,7 @@ export default function SettingsPage() {
                 Preview PDF
               </button>
             )}
-            {activeTab !== 'branches' && activeTab !== 'device' && (
+            {activeTab !== 'branches' && activeTab !== 'device' && activeTab !== 'team' && activeTab !== 'permissions' && (
               <button
                 type="button"
                 onClick={handleSave}
@@ -835,6 +854,14 @@ export default function SettingsPage() {
                   </button>
                 </section>
               </div>
+            )}
+
+            {activeTab === 'team' && showTeamTab && (
+              <TeamSection branches={branches} />
+            )}
+
+            {activeTab === 'permissions' && showPermissionsTab && (
+              <PermissionsSection />
             )}
 
             {activeTab === 'device' && (

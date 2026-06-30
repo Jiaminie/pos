@@ -2,22 +2,30 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import {
   ArrowLeftRight,
   BarChart3,
+  ChevronDown,
   LayoutDashboard,
   LayoutGrid,
+  Loader2,
+  LogOut,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
   ShoppingCart,
   Store,
+  WifiOff,
 } from 'lucide-react'
 import { BranchSetup } from '@/components/BranchSetup'
+import { PinLogin } from '@/components/PinLogin'
 import { getMyBranchId } from '@/lib/branch'
 import { getAll as getBranches } from '@/lib/db/branches'
+import { replaceCatalogFromServer } from '@/lib/db/seed'
+import { fetchMe, logout, type AuthUser, canViewReports } from '@/lib/auth'
 import type { Branch } from '@/lib/types'
+import { toast } from 'sonner'
 
 const SIDEBAR_COLLAPSED_KEY = 'pos_sidebar_collapsed'
 
@@ -42,9 +50,16 @@ function navLinkClass(active: boolean, mobile = false) {
 
 export default function UILayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const router = useRouter()
   const [mounted, setMounted]             = useState(false)
   const [branchId, setBranchId]           = useState<string | null>(null)
+  const [branches, setBranches]           = useState<Branch[]>([])
   const [currentBranch, setCurrentBranch] = useState<Branch | null>(null)
+  const [authUser, setAuthUser]           = useState<AuthUser | null>(null)
+  const [authChecked, setAuthChecked]     = useState(false)
+  const [syncing, setSyncing]             = useState(false)
+  const [switching, setSwitching]         = useState(false)
+  const [branchMenuOpen, setBranchMenuOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   useEffect(() => {
@@ -53,9 +68,70 @@ export default function UILayout({ children }: { children: React.ReactNode }) {
     setMounted(true)
     setSidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true')
     if (id) {
-      getBranches().then((all) => setCurrentBranch(all.find((b) => b.id === id) ?? null))
+      getBranches().then((all) => {
+        setBranches(all)
+        setCurrentBranch(all.find((b) => b.id === id) ?? null)
+      })
+      fetchMe().then((u) => {
+        setAuthUser(u)
+        setAuthChecked(true)
+      })
+    } else {
+      setAuthChecked(true)
     }
   }, [])
+
+  async function afterLogin() {
+    setSyncing(true)
+    try {
+      await replaceCatalogFromServer()
+      const u = await fetchMe()
+      setAuthUser(u)
+      const all = await getBranches()
+      setBranches(all)
+      const id = getMyBranchId()
+      if (id) setCurrentBranch(all.find((b) => b.id === id) ?? null)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  async function handleOwnerBranchSwitch(newBranchId: string) {
+    if (!navigator.onLine) {
+      toast.error('Branch switch requires an internet connection')
+      return
+    }
+    setSwitching(true)
+    try {
+      const res = await fetch('/api/auth/switch-branch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ branchId: newBranchId }),
+      })
+      if (!res.ok) {
+        const { error } = await res.json()
+        throw new Error(error ?? 'Switch failed')
+      }
+      localStorage.setItem('pos_branch_id', newBranchId)
+      setBranchId(newBranchId)
+      setCurrentBranch(branches.find((b) => b.id === newBranchId) ?? null)
+      await replaceCatalogFromServer()
+      setAuthUser((prev) => prev ? { ...prev, branchId: newBranchId } : prev)
+      setBranchMenuOpen(false)
+      router.refresh()
+      toast.success('Branch switched')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Switch failed')
+    } finally {
+      setSwitching(false)
+    }
+  }
+
+  async function handleLogout() {
+    await logout()
+    setAuthUser(null)
+    router.refresh()
+  }
 
   function toggleSidebar() {
     setSidebarCollapsed((prev) => {
@@ -69,6 +145,11 @@ export default function UILayout({ children }: { children: React.ReactNode }) {
     return pathname === href || pathname.startsWith(`${href}/`)
   }
 
+  const visibleNav = nav.filter((item) => {
+    if (item.href === '/reports' && authUser && !canViewReports(authUser)) return false
+    return true
+  })
+
   if (!mounted) return null
 
   if (!branchId) {
@@ -78,16 +159,45 @@ export default function UILayout({ children }: { children: React.ReactNode }) {
           const id = getMyBranchId()
           setBranchId(id)
           if (id) {
-            getBranches().then((all) => setCurrentBranch(all.find((b) => b.id === id) ?? null))
+            getBranches().then((all) => {
+              setBranches(all)
+              setCurrentBranch(all.find((b) => b.id === id) ?? null)
+            })
           }
         }}
       />
     )
   }
 
+  if (!authChecked) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-sm text-gray-400">
+        <Loader2 size={18} className="animate-spin mr-2" /> Loading…
+      </div>
+    )
+  }
+
+  if (!authUser) {
+    return (
+      <PinLogin
+        branchId={branchId}
+        branchName={currentBranch?.name ?? 'this branch'}
+        onComplete={() => void afterLogin()}
+      />
+    )
+  }
+
+  if (syncing) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center text-sm text-gray-500 gap-2">
+        <Loader2 size={20} className="animate-spin text-blue-600" />
+        Syncing catalog…
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-1 overflow-hidden">
-      {/* Desktop sidebar */}
       <nav
         className={`hidden md:flex border-r border-gray-200 bg-white flex-col shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out ${
           sidebarCollapsed ? 'w-14' : 'w-56'
@@ -116,8 +226,41 @@ export default function UILayout({ children }: { children: React.ReactNode }) {
         </div>
 
         {currentBranch && (
-          <div className={`mb-2 ${sidebarCollapsed ? 'flex justify-center px-2' : 'px-4'}`}>
-            {sidebarCollapsed ? (
+          <div className={`mb-2 relative ${sidebarCollapsed ? 'flex justify-center px-2' : 'px-4'}`}>
+            {authUser.role === 'OWNER' && !sidebarCollapsed ? (
+              <div className="relative">
+                <button
+                  type="button"
+                  disabled={switching}
+                  onClick={() => setBranchMenuOpen((o) => !o)}
+                  className="w-full inline-flex items-center gap-1 text-[10px] bg-blue-50 text-blue-700 border border-blue-100 rounded-full px-2 py-0.5 font-medium max-w-full hover:bg-blue-100 transition-colors"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
+                  <span className="truncate flex-1 text-left">{currentBranch.name}</span>
+                  <ChevronDown size={10} className="shrink-0" />
+                </button>
+                {branchMenuOpen && (
+                  <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 max-h-48 overflow-y-auto">
+                    {!navigator.onLine && (
+                      <p className="px-2 py-1.5 text-[10px] text-amber-600 flex items-center gap-1">
+                        <WifiOff size={10} /> Offline — switch blocked
+                      </p>
+                    )}
+                    {branches.map((b) => (
+                      <button
+                        key={b.id}
+                        type="button"
+                        disabled={switching || b.id === branchId}
+                        onClick={() => handleOwnerBranchSwitch(b.id)}
+                        className={`w-full text-left px-2 py-1.5 text-xs hover:bg-gray-50 ${b.id === branchId ? 'text-blue-600 font-medium' : 'text-gray-700'}`}
+                      >
+                        {b.name} <span className="text-gray-400 font-mono">{b.code}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : sidebarCollapsed ? (
               <span
                 className="w-2 h-2 rounded-full bg-blue-500 shrink-0"
                 title={currentBranch.name}
@@ -132,7 +275,7 @@ export default function UILayout({ children }: { children: React.ReactNode }) {
         )}
 
         <div className={`flex flex-col gap-1 flex-1 pb-5 ${sidebarCollapsed ? 'px-2' : 'px-3'}`}>
-          {nav.map(({ href, label, icon: Icon }) => (
+          {visibleNav.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}
               href={href}
@@ -146,16 +289,29 @@ export default function UILayout({ children }: { children: React.ReactNode }) {
             </Link>
           ))}
         </div>
+
+        {!sidebarCollapsed && (
+          <div className="px-3 pb-4 border-t border-gray-100 pt-3 space-y-2">
+            <p className="text-[10px] text-gray-500 truncate px-1">{authUser.name} · {authUser.role.toLowerCase()}</p>
+            <button
+              type="button"
+              onClick={() => void handleLogout()}
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <LogOut size={14} />
+              Sign out
+            </button>
+          </div>
+        )}
       </nav>
 
       <main className="flex-1 overflow-hidden flex flex-col bg-white text-gray-900 min-w-0">
         {children}
       </main>
 
-      {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-gray-200 bg-white/95 backdrop-blur-sm safe-area-pb">
         <div className="flex items-stretch justify-around px-1 pt-1 pb-2">
-          {nav.map(({ href, label, icon: Icon }) => {
+          {visibleNav.map(({ href, label, icon: Icon }) => {
             const active = isActive(href)
             return (
               <Link
