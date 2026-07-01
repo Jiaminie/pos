@@ -385,7 +385,8 @@ function ProductsPageContent() {
           ...(form.imageUrl ? { imageUrl: form.imageUrl } : {}),
         }
         await upsertMany([updated])
-        await fetch(`/api/products/${editingProduct.id}`, {
+        setProducts((prev) => prev.map((p) => p.id === updated.id ? updated : p))
+        fetch(`/api/products/${editingProduct.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -400,8 +401,11 @@ function ProductsPageContent() {
             imageUrl: updated.imageUrl ?? null,
             ...(showBarcodeField ? { barcode: updated.barcode ?? null } : {}),
           }),
+        }).then((res) => {
+          if (!res.ok) toast.error('Saved locally — sync to server failed, will retry')
+        }).catch(() => {
+          toast.error('Saved locally — sync to server failed, will retry')
         })
-        setProducts((prev) => prev.map((p) => p.id === updated.id ? updated : p))
 
         // Restock if requested
         const addQty = parseFloat(form.addStock)
@@ -461,7 +465,10 @@ function ProductsPageContent() {
           setTransactions((prev) => [tx, ...prev])
         }
 
-        await fetch('/api/products', {
+        setProducts((prev) => [product, ...prev])
+        setPage(1)
+        toast.success('Product saved')
+        fetch('/api/products', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -478,10 +485,11 @@ function ProductsPageContent() {
             imageUrl: product.imageUrl ?? null,
             ...(barcodeValue ? { barcode: barcodeValue } : {}),
           }),
+        }).then((res) => {
+          if (!res.ok) toast.error('Saved locally — sync to server failed, will retry')
+        }).catch(() => {
+          toast.error('Saved locally — sync to server failed, will retry')
         })
-        setProducts((prev) => [product, ...prev])
-        setPage(1)
-        toast.success('Product saved')
       }
 
       setForm(emptyForm)

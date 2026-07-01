@@ -1,11 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as Select from '@radix-ui/react-select'
 import { ChevronDown, Loader2, Plus, UserPlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { fetchMe, type AuthUser } from '@/lib/auth'
 import type { Branch, Role, TeamUser } from '@/lib/types'
+
+type PendingTeamUser = TeamUser & { pending?: boolean }
 
 function randomPin(): string {
   return String(Math.floor(1000 + Math.random() * 9000))
@@ -13,11 +15,11 @@ function randomPin(): string {
 
 export function TeamSection({ branches }: { branches: Branch[] }) {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
-  const [users, setUsers] = useState<TeamUser[]>([])
+  const [users, setUsers] = useState<PendingTeamUser[]>([])
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
   const [createdPin, setCreatedPin] = useState<string | null>(null)
+  const creating = useRef(false)
   const [form, setForm] = useState({
     name: '',
     pin: randomPin(),
@@ -57,7 +59,8 @@ export function TeamSection({ branches }: { branches: Branch[] }) {
     ? branches.filter((b) => b.id === authUser.branchId)
     : branches
 
-  async function handleCreate() {
+  function handleCreate() {
+    if (creating.current) return
     if (!form.name.trim()) {
       toast.error('Name is required')
       return
@@ -67,57 +70,78 @@ export function TeamSection({ branches }: { branches: Branch[] }) {
       toast.error('Select a branch')
       return
     }
-    setSaving(true)
-    try {
-      const res = await fetch('/api/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, branchId }),
-      })
+    creating.current = true
+
+    const tempId = `pending-${crypto.randomUUID()}`
+    const branchInfo = branches.find((b) => b.id === branchId) ?? null
+    const optimistic: PendingTeamUser = {
+      id: tempId,
+      name: form.name.trim(),
+      role: form.role,
+      branchId: branchId || null,
+      active: true,
+      branch: branchInfo ? { id: branchInfo.id, name: branchInfo.name, code: branchInfo.code } : null,
+      pending: true,
+    }
+    const pinToShow = form.pin
+    setUsers((prev) => [...prev, optimistic])
+    setForm({ name: '', pin: randomPin(), role: 'CASHIER', branchId: '' })
+    setShowCreate(false)
+
+    fetch('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...form, branchId }),
+    }).then(async (res) => {
       const { data, error } = await res.json()
       if (!res.ok) throw new Error(error)
-      setUsers((prev) => [...prev, data])
-      setCreatedPin(form.pin)
-      setForm({ name: '', pin: randomPin(), role: 'CASHIER', branchId: '' })
-      setShowCreate(false)
+      setUsers((prev) => prev.map((u) => u.id === tempId ? data : u))
+      setCreatedPin(pinToShow)
       toast.success(`Created ${data.name}`)
-    } catch (err) {
+    }).catch((err) => {
+      setUsers((prev) => prev.filter((u) => u.id !== tempId))
       toast.error(err instanceof Error ? err.message : 'Create failed')
-    } finally {
-      setSaving(false)
-    }
+    }).finally(() => {
+      creating.current = false
+    })
   }
 
-  async function toggleActive(user: TeamUser) {
-    try {
-      const res = await fetch(`/api/users/${user.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ active: !user.active }),
-      })
+  function toggleActive(user: PendingTeamUser) {
+    if (user.pending) { toast.error('Still syncing — try again in a moment'); return }
+    const prevUsers = users
+    setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, active: !u.active } : u)))
+
+    fetch(`/api/users/${user.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: !user.active }),
+    }).then(async (res) => {
       const { data, error } = await res.json()
       if (!res.ok) throw new Error(error)
       setUsers((prev) => prev.map((u) => (u.id === user.id ? data : u)))
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Update failed')
-    }
+    }).catch((err) => {
+      setUsers(prevUsers)
+      toast.error(err instanceof Error ? err.message : 'Update failed — reverted')
+    })
   }
 
-  async function resetPin(user: TeamUser) {
+  function resetPin(user: PendingTeamUser) {
+    if (user.pending) { toast.error('Still syncing — try again in a moment'); return }
     const pin = randomPin()
-    try {
-      const res = await fetch(`/api/users/${user.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin }),
-      })
+    setCreatedPin(pin)
+    toast.success(`PIN reset for ${user.name}`)
+
+    fetch(`/api/users/${user.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin }),
+    }).then(async (res) => {
       const { error } = await res.json()
       if (!res.ok) throw new Error(error)
-      setCreatedPin(pin)
-      toast.success(`PIN reset for ${user.name}`)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Reset failed')
-    }
+    }).catch((err) => {
+      setCreatedPin(null)
+      toast.error(err instanceof Error ? err.message : 'PIN reset failed — the old PIN is still active')
+    })
   }
 
   return (
@@ -164,11 +188,12 @@ export function TeamSection({ branches }: { branches: Branch[] }) {
                     {user.role.toLowerCase()}
                     {user.branch ? ` · ${user.branch.name}` : ''}
                     {!user.active && <span className="text-red-500 ml-1">(inactive)</span>}
+                    {user.pending && <span className="text-gray-400 ml-1">(syncing…)</span>}
                   </p>
                 </div>
                 <div className="flex gap-2 shrink-0">
-                  <button type="button" onClick={() => resetPin(user)} className="text-xs text-blue-600 hover:underline">Reset PIN</button>
-                  <button type="button" onClick={() => toggleActive(user)} className="text-xs text-gray-600 hover:underline">
+                  <button type="button" disabled={user.pending} onClick={() => resetPin(user)} className="text-xs text-blue-600 hover:underline disabled:opacity-40 disabled:no-underline">Reset PIN</button>
+                  <button type="button" disabled={user.pending} onClick={() => toggleActive(user)} className="text-xs text-gray-600 hover:underline disabled:opacity-40 disabled:no-underline">
                     {user.active ? 'Deactivate' : 'Activate'}
                   </button>
                 </div>
@@ -283,11 +308,10 @@ export function TeamSection({ branches }: { branches: Branch[] }) {
             <button type="button" onClick={() => setShowCreate(false)} className="flex-1 border border-gray-300 py-2 rounded-lg text-sm">Cancel</button>
             <button
               type="button"
-              disabled={saving}
-              onClick={() => void handleCreate()}
+              onClick={handleCreate}
               className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-1"
             >
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+              <Plus size={14} />
               Create
             </button>
           </div>

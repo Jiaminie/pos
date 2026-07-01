@@ -38,6 +38,7 @@ const TABS: { id: SettingsTab; label: string; description: string; icon: typeof 
 
 type BranchForm = { name: string; code: string; address: string }
 const EMPTY_BRANCH_FORM: BranchForm = { name: '', code: '', address: '' }
+type PendingBranch = Branch & { pending?: boolean }
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<PDFSettings>(DEFAULT_SETTINGS)
@@ -47,10 +48,10 @@ export default function SettingsPage() {
   const logoInputRef = useRef<HTMLInputElement>(null)
 
   // Branches tab state
-  const [branches, setBranches]           = useState<Branch[]>([])
+  const [branches, setBranches]           = useState<PendingBranch[]>([])
   const [branchesLoading, setBranchesLoading] = useState(false)
   const [branchForm, setBranchForm]       = useState<BranchForm>(EMPTY_BRANCH_FORM)
-  const [branchSaving, setBranchSaving]   = useState(false)
+  const branchCreating = useRef(false)
 
   // Email tab state
   const [emailSettings, setEmailSettings] = useState<EmailSettings>(DEFAULT_EMAIL_SETTINGS)
@@ -101,43 +102,64 @@ export default function SettingsPage() {
     }
   }
 
-  async function handleCreateBranch() {
+  function handleCreateBranch() {
+    if (branchCreating.current) return
     if (!branchForm.name.trim() || !branchForm.code.trim()) {
       toast.error('Name and code are required')
       return
     }
     const orgId = getMyOrgId()
     if (!orgId) { toast.error('No organization found. Sync catalog first.'); return }
-    setBranchSaving(true)
-    try {
-      const res = await fetch('/api/branches', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ organizationId: orgId, ...branchForm }),
-      })
-      const { data, error } = await res.json()
-      if (!res.ok) { toast.error(error ?? 'Failed to create branch'); return }
-      setBranches((prev) => [...prev, data])
-      setBranchForm(EMPTY_BRANCH_FORM)
-      toast.success(`Branch "${data.name}" created`)
-    } finally {
-      setBranchSaving(false)
+    branchCreating.current = true
+
+    const tempId = `pending-${crypto.randomUUID()}`
+    const optimistic: PendingBranch = {
+      id: tempId,
+      organizationId: orgId,
+      name: branchForm.name.trim(),
+      code: branchForm.code.trim(),
+      address: branchForm.address.trim() || undefined,
+      isPrimary: false,
+      pending: true,
     }
+    const formSnapshot = branchForm
+    setBranches((prev) => [...prev, optimistic])
+    setBranchForm(EMPTY_BRANCH_FORM)
+
+    fetch('/api/branches', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ organizationId: orgId, ...formSnapshot }),
+    }).then(async (res) => {
+      const { data, error } = await res.json()
+      if (!res.ok) throw new Error(error ?? 'Failed to create branch')
+      setBranches((prev) => prev.map((b) => b.id === tempId ? data : b))
+      toast.success(`Branch "${data.name}" created`)
+    }).catch((err) => {
+      setBranches((prev) => prev.filter((b) => b.id !== tempId))
+      setBranchForm(formSnapshot)
+      toast.error(err instanceof Error ? err.message : 'Failed to create branch')
+    }).finally(() => {
+      branchCreating.current = false
+    })
   }
 
-  async function handleSetPrimary(branch: Branch) {
-    try {
-      const res = await fetch(`/api/branches/${branch.id}`, {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ isPrimary: true }),
-      })
-      if (!res.ok) { toast.error('Failed to update primary branch'); return }
-      setBranches((prev) => prev.map((b) => ({ ...b, isPrimary: b.id === branch.id })))
-      toast.success(`"${branch.name}" is now the primary branch`)
-    } catch {
-      toast.error('Failed to update primary branch')
-    }
+  function handleSetPrimary(branch: PendingBranch) {
+    if (branch.pending) { toast.error('Still syncing — try again in a moment'); return }
+    const prevBranches = branches
+    setBranches((prev) => prev.map((b) => ({ ...b, isPrimary: b.id === branch.id })))
+    toast.success(`"${branch.name}" is now the primary branch`)
+
+    fetch(`/api/branches/${branch.id}`, {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ isPrimary: true }),
+    }).then((res) => {
+      if (!res.ok) throw new Error()
+    }).catch(() => {
+      setBranches(prevBranches)
+      toast.error('Failed to update primary branch — reverted')
+    })
   }
 
   function handleDeviceBranchChange(newBranchId: string) {
@@ -787,6 +809,9 @@ export default function SettingsPage() {
                                   Primary
                                 </span>
                               )}
+                              {branch.pending && (
+                                <span className="text-[10px] text-gray-400 font-medium">Syncing…</span>
+                              )}
                             </div>
                             {branch.address && (
                               <p className="flex items-center gap-1 text-xs text-gray-500 mt-0.5">
@@ -795,7 +820,7 @@ export default function SettingsPage() {
                               </p>
                             )}
                           </div>
-                          {!branch.isPrimary && (
+                          {!branch.isPrimary && !branch.pending && (
                             <button
                               type="button"
                               onClick={() => handleSetPrimary(branch)}
@@ -853,18 +878,17 @@ export default function SettingsPage() {
                   <button
                     type="button"
                     onClick={handleCreateBranch}
-                    disabled={branchSaving}
                     className="flex items-center gap-1.5 bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors disabled:opacity-60"
                   >
-                    {branchSaving ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
-                    {branchSaving ? 'Creating…' : 'Create branch'}
+                    <Plus size={13} />
+                    Create branch
                   </button>
                 </section>
               </div>
             )}
 
             {activeTab === 'team' && showTeamTab && (
-              <TeamSection branches={branches} />
+              <TeamSection branches={branches.filter((b) => !b.pending)} />
             )}
 
             {activeTab === 'permissions' && showPermissionsTab && (
@@ -1002,7 +1026,7 @@ export default function SettingsPage() {
                     </p>
                   ) : (
                     <div className="space-y-2">
-                      {branches.map((branch) => {
+                      {branches.filter((b) => !b.pending).map((branch) => {
                         const selected = branch.id === deviceBranchId
                         return (
                           <button
