@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useDeferredValue, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useSearchParams } from 'next/navigation'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Label from '@radix-ui/react-label'
@@ -38,8 +38,70 @@ const emptyForm = {
 }
 const PAGE_SIZE = 20
 
+const PRODUCT_COLUMNS = [
+  { key: 'image', width: 80 },
+  { key: 'name', width: 240 },
+  { key: 'spec', width: 130 },
+  { key: 'sku', width: 150 },
+  { key: 'brand', width: 130 },
+  { key: 'stock', width: 90 },
+  { key: 'sell', width: 90 },
+  { key: 'lowest', width: 90 },
+  { key: 'discount', width: 90 },
+  { key: 'cost', width: 90 },
+  { key: 'addStock', width: 130 },
+  { key: 'edit', width: 40 },
+] as const
+const MIN_COL_WIDTH = 32
+const COL_WIDTHS_STORAGE_KEY = 'products-table-col-widths-v1'
+
+function useResizableColumns() {
+  const [widths, setWidths] = useState<number[]>(() => {
+    if (typeof window === 'undefined') return PRODUCT_COLUMNS.map((c) => c.width)
+    try {
+      const saved = JSON.parse(localStorage.getItem(COL_WIDTHS_STORAGE_KEY) ?? 'null')
+      if (Array.isArray(saved) && saved.length === PRODUCT_COLUMNS.length) return saved
+    } catch {
+      // ignore malformed storage
+    }
+    return PRODUCT_COLUMNS.map((c) => c.width)
+  })
+  const resizing = useRef<{ index: number; startX: number; startWidth: number } | null>(null)
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const r = resizing.current
+      if (!r) return
+      const next = Math.max(MIN_COL_WIDTH, r.startWidth + (e.clientX - r.startX))
+      setWidths((prev) => prev.map((w, i) => (i === r.index ? next : w)))
+    }
+    const onUp = () => {
+      if (!resizing.current) return
+      resizing.current = null
+      setWidths((prev) => {
+        localStorage.setItem(COL_WIDTHS_STORAGE_KEY, JSON.stringify(prev))
+        return prev
+      })
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [])
+
+  const startResize = (index: number) => (e: ReactMouseEvent) => {
+    e.preventDefault()
+    resizing.current = { index, startX: e.clientX, startWidth: widths[index] }
+  }
+
+  return { widths, startResize }
+}
+
 function ProductsPageContent() {
   const searchParams = useSearchParams()
+  const { widths: colWidths, startResize } = useResizableColumns()
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<ProductCategory[]>([])
   const [units, setUnits] = useState<Unit[]>([])
@@ -1074,36 +1136,34 @@ function ProductsPageContent() {
       ) : (
         <div className="border border-gray-200 rounded-xl">
           {/* Desktop Table View */}
-          <div className="hidden md:block">
-            <table className="w-full text-sm table-fixed">
+          <div className="hidden md:block overflow-x-auto">
+            <table className="text-sm table-fixed" style={{ width: colWidths.reduce((a, b) => a + b, 0) }}>
               <colgroup>
-                <col className="w-20" />
-                <col />
-                <col className="w-[9%]" />
-                <col className="w-[11%]" />
-                <col className="w-[10%]" />
-                <col className="w-[8%]" />
-                <col className="w-[6%]" />
-                <col className="w-[6%]" />
-                <col className="w-[7%]" />
-                <col className="w-[6%]" />
-                <col className="w-[10%]" />
-                <col className="w-9" />
+                {colWidths.map((w, i) => (
+                  <col key={PRODUCT_COLUMNS[i].key} style={{ width: w }} />
+                ))}
               </colgroup>
               <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
                 <tr>
-                  <th className="px-3 py-3"></th>
-                  <th className="text-left px-3 py-3">Name</th>
-                  <th className="text-left px-3 py-3">Spec / Size</th>
-                  <th className="text-left px-3 py-3">SKU</th>
-                  <th className="text-left px-3 py-3">Brand</th>
-                  <th className="text-right px-3 py-3">In stock</th>
-                  <th className="text-right px-3 py-3">Sell</th>
-                  <th className="text-right px-3 py-3">Lowest</th>
-                  <th className="text-right px-3 py-3">Discount</th>
-                  <th className="text-right px-3 py-3">Cost</th>
-                  <th className="px-3 py-3 text-right">Add stock</th>
-                  <th className="px-2 py-3"></th>
+                  {[
+                    '', 'Name', 'Spec / Size', 'SKU', 'Brand', 'In stock', 'Sell', 'Lowest', 'Discount', 'Cost', 'Add stock', '',
+                  ].map((label, i) => {
+                    const alignRight = i >= 5 && i <= 10
+                    return (
+                      <th
+                        key={PRODUCT_COLUMNS[i].key}
+                        className={`relative px-3 py-3 select-none ${alignRight ? 'text-right' : 'text-left'} ${i === 0 || i === 11 ? 'px-2' : ''}`}
+                      >
+                        {label}
+                        {i < PRODUCT_COLUMNS.length - 1 && (
+                          <div
+                            onMouseDown={startResize(i)}
+                            className="absolute top-0 right-0 h-full w-2 cursor-col-resize hover:bg-blue-300/50 -mr-1 z-10"
+                          />
+                        )}
+                      </th>
+                    )
+                  })}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">

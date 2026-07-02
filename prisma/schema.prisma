@@ -48,6 +48,7 @@ model Branch {
   code           String
   isPrimary      Boolean  @default(false) @map("is_primary")
   address        String?
+  archived       Boolean  @default(false)
   createdAt      DateTime @default(now()) @map("created_at")
 
   organization  Organization           @relation(fields: [organizationId], references: [id])
