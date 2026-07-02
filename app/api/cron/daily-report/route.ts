@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/server/db'
+import { buildStockByProductFromGroupBy } from '@/lib/server/stockAccumulation'
 import { Resend } from 'resend'
 import { generateCOBReportPDF } from '@/lib/pdf'
 import type { COBReportData, COBReportRow, MissedSaleRow, ABCAnalysis } from '@/lib/pdf'
@@ -55,16 +56,13 @@ export async function POST() {
       by: ['productId', 'type'],
       _sum: { quantity: true },
     })
-    const stockByProduct = new Map<string, number>()
-    for (const row of allTime) {
-      const prev = stockByProduct.get(row.productId) ?? 0
-      const qty  = Number(row._sum.quantity ?? 0)
-      if (row.type === 'PURCHASE' || row.type === 'RETURN') {
-        stockByProduct.set(row.productId, prev + qty)
-      } else if (row.type === 'SALE' || row.type === 'ADJUSTMENT') {
-        stockByProduct.set(row.productId, prev - qty)
-      }
-    }
+    const stockByProduct = buildStockByProductFromGroupBy(
+      allTime.map((row) => ({
+        productId: row.productId,
+        type: row.type,
+        quantity: Number(row._sum.quantity ?? 0),
+      })),
+    )
 
     // ── All products (for low-stock + ABC zero-sale classification)
     const allProducts = await prisma.product.findMany()

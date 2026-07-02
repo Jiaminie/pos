@@ -7,6 +7,7 @@ import {
   ArrowLeftRight,
   BarChart3,
   ChevronDown,
+  ClipboardList,
   LayoutDashboard,
   LayoutGrid,
   Loader2,
@@ -23,7 +24,7 @@ import { PinLogin } from '@/components/PinLogin'
 import { getMyBranchId } from '@/lib/branch'
 import { getAll as getBranches } from '@/lib/db/branches'
 import { replaceCatalogFromServer } from '@/lib/db/seed'
-import { fetchMe, getCachedAuthUser, logout, type AuthUser, canViewReports } from '@/lib/auth'
+import { fetchMe, getCachedAuthUser, logout, type AuthUser, canViewReports, hasPermission } from '@/lib/auth'
 import type { Branch } from '@/lib/types'
 import { toast } from 'sonner'
 
@@ -34,6 +35,7 @@ const nav = [
   { href: '/products',   label: 'Products',   icon: Store },
   { href: '/pos',        label: 'POS',        icon: ShoppingCart },
   { href: '/transfers',  label: 'Transfers',  icon: ArrowLeftRight },
+  { href: '/stock-count', label: 'Stock Count', icon: ClipboardList },
   { href: '/categories', label: 'Brands',     icon: LayoutGrid },
   { href: '/reports',    label: 'Reports',    icon: BarChart3 },
   { href: '/settings',   label: 'Settings',   icon: Settings },
@@ -155,6 +157,7 @@ export default function UILayout({ children }: { children: React.ReactNode }) {
 
   const visibleNav = nav.filter((item) => {
     if (item.href === '/reports' && authUser && !canViewReports(authUser)) return false
+    if (item.href === '/stock-count' && authUser && !hasPermission(authUser, 'stock.count.adjust')) return false
     return true
   })
 

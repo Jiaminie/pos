@@ -57,6 +57,7 @@ model Branch {
   transfersTo   StockTransfer[]        @relation("TransferTo")
   users         User[]
   sales         Sale[]
+  stockCountUploads StockCountUpload[]
 
   @@unique([organizationId, code])
   @@map("branches")
@@ -78,6 +79,7 @@ model User {
   createdBy    User?        @relation("UserCreatedBy", fields: [createdById], references: [id])
   created      User[]       @relation("UserCreatedBy")
   sales        Sale[]
+  stockCountUploads StockCountUpload[]
 
   @@index([organizationId])
   @@index([branchId])
@@ -272,6 +274,34 @@ model Incident {
   product Product? @relation(fields: [productId], references: [id])
 
   @@map("incidents")
+}
+
+enum StockCountUploadStatus {
+  PENDING
+  EXTRACTED
+  ERROR
+  SUBMITTED
+  DISCARDED
+}
+
+model StockCountUpload {
+  id            String                 @id @default(uuid())
+  branchId      String                 @map("branch_id")
+  uploadedById  String                 @map("uploaded_by_id")
+  imageUrl      String                 @map("image_url")
+  status        StockCountUploadStatus @default(PENDING)
+  extractedRows Json?                  @map("extracted_rows")
+  errorMessage  String?                @map("error_message")
+  createdAt     DateTime               @default(now()) @map("created_at")
+  updatedAt     DateTime               @default(now()) @updatedAt @map("updated_at")
+  submittedAt   DateTime?              @map("submitted_at")
+
+  branch     Branch @relation(fields: [branchId], references: [id])
+  uploadedBy User   @relation(fields: [uploadedById], references: [id])
+
+  @@index([branchId, status])
+  @@index([uploadedById, status])
+  @@map("stock_count_uploads")
 }
 
 model StoreSettings {

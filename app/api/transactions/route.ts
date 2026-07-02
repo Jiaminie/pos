@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/server/db";
 import { requireUser, isAuthUser, assertBranchAccess, requirePermission } from "@/lib/server/auth/guard";
+import { getTransactionPermission } from "@/lib/server/auth/transactionPermissions";
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 100
@@ -64,14 +65,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { productId, type, quantity, unitPrice, deviceId, branchId } = body;
 
-    const permissionByType: Record<string, 'stock.count.adjust' | 'stock.purchase.receive' | 'sales.create' | 'stock.transfer.initiate' | 'sales.void'> = {
-      ADJUSTMENT: 'stock.count.adjust',
-      PURCHASE: 'stock.purchase.receive',
-      SALE: 'sales.create',
-      TRANSFER_OUT: 'stock.transfer.initiate',
-      RETURN: 'sales.void',
-    }
-    const required = permissionByType[type as string]
+    const required = getTransactionPermission(type as string)
     if (!required) {
       return Response.json({ data: null, error: 'Invalid transaction type' }, { status: 400 })
     }

@@ -52,6 +52,13 @@ export function assertBranchAccess(user: AuthUser, branchId: string): Response |
   return null
 }
 
+/** Whether this user may sync/write transactions for the given branch. */
+export function canAccessBranch(user: AuthUser, branchId: string | null | undefined): boolean {
+  if (!branchId) return true
+  if (user.role === 'OWNER') return true
+  return user.branchId === branchId
+}
+
 export async function requirePermission(
   user: AuthUser,
   permission: PermissionKey,

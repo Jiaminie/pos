@@ -56,3 +56,17 @@ export async function createMany(items: InventoryTransaction[]): Promise<void> {
     idbTx.onerror = () => reject(idbTx.error)
   })
 }
+
+// Purges transactions the server rejected (forbidden/invalid_type) during sync,
+// so locally-computed stock never permanently diverges from the server's view.
+export async function removeMany(ids: string[]): Promise<void> {
+  if (ids.length === 0) return
+  const db = await openDb()
+  await new Promise<void>((resolve, reject) => {
+    const idbTx = db.transaction('transactions', 'readwrite')
+    const store = idbTx.objectStore('transactions')
+    for (const id of ids) store.delete(id)
+    idbTx.oncomplete = () => resolve()
+    idbTx.onerror = () => reject(idbTx.error)
+  })
+}

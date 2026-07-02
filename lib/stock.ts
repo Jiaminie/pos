@@ -2,6 +2,16 @@ import type { InventoryTransaction, Product } from './types'
 
 export const LOW_STOCK_THRESHOLD = 5
 
+/** Client-side transaction vocabulary — ADJUSTMENT quantity is a signed delta. */
+export function applyClientStockDelta(
+  stock: number,
+  type: InventoryTransaction['type'],
+  quantity: number,
+): number {
+  if (type === 'STOCK_IN' || type === 'ADJUSTMENT') return stock + quantity
+  return stock - quantity
+}
+
 export function buildStockByProductId(
   products: Product[],
   transactions: InventoryTransaction[],
@@ -22,9 +32,7 @@ export function buildStockByProductId(
 
   for (const tx of relevant) {
     const current = byProductId[tx.productId] ?? 0
-    byProductId[tx.productId] = tx.type === 'STOCK_IN'
-      ? current + tx.quantity
-      : current - tx.quantity
+    byProductId[tx.productId] = applyClientStockDelta(current, tx.type, tx.quantity)
   }
 
   return byProductId
@@ -42,7 +50,7 @@ export function computeStock(
 
   return relevant.reduce((stock, tx) => {
     if (tx.productId !== productId) return stock
-    return tx.type === 'STOCK_IN' ? stock + tx.quantity : stock - tx.quantity
+    return applyClientStockDelta(stock, tx.type, tx.quantity)
   }, initialStock)
 }
 

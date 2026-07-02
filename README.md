@@ -91,14 +91,20 @@ A modern, full-featured Point of Sale (POS) system built with Next.js, React, an
    ```
 
 3. **Set up environment variables**
-   Create a `.env.local` file in the root directory with the following variables:
+   ```bash
+   cp .env.example .env.local
+   ```
+   Edit `.env.local` with your values:
    ```env
    DATABASE_URL=postgresql://user:password@localhost:5432/pos_db
    CLOUDINARY_CLOUD_NAME=your_cloud_name
    CLOUDINARY_API_KEY=your_api_key
    CLOUDINARY_API_SECRET=your_api_secret
+   ANTHROPIC_API_KEY=your_anthropic_api_key
    RESEND_API_KEY=your_resend_api_key
    ```
+
+   Verify prerequisites: `npm run verify:phase0` (add `--require-cloudinary` once Cloudinary creds are set).
 
 4. **Set up the database**
    ```bash
@@ -126,6 +132,8 @@ A modern, full-featured Point of Sale (POS) system built with Next.js, React, an
 - `npm run build` - Build for production (generates Prisma client and builds Next.js)
 - `npm start` - Start production server
 - `npm run lint` - Run ESLint to check code quality
+- `npm run verify:phase0` … `npm run verify:phase6` - Stock count plan phase gates (see `docs/plans/stock-count.md`)
+- `npm run verify:stock-count` - Phase 7 final gate (unit/static checks + runs phase0–6; pass `--skip-phases` to skip subprocesses)
 
 ## 🏗️ Project Structure
 

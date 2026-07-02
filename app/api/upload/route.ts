@@ -1,12 +1,7 @@
 import { NextRequest } from "next/server";
 import { v2 as cloudinary } from "cloudinary";
-import { requireUser, isAuthUser, requireUserWithPermission } from "@/lib/server/auth/guard";
-
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
+import { isAuthUser, requireUserWithPermission } from "@/lib/server/auth/guard";
+import { cloudinaryEnvReady, configureCloudinary } from "@/lib/server/cloudinary";
 
 const MAX_SIZE = 2 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -15,7 +10,15 @@ export async function POST(request: NextRequest) {
   const user = await requireUserWithPermission(request, 'catalog.product.manage');
   if (!isAuthUser(user)) return user;
 
+  if (!cloudinaryEnvReady()) {
+    return Response.json(
+      { data: null, error: "Cloudinary credentials are not configured" },
+      { status: 503 },
+    );
+  }
+
   try {
+    configureCloudinary();
     const formData = await request.formData();
     const file = formData.get("file");
 

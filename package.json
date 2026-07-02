@@ -7,9 +7,19 @@
     "build": "prisma generate && next build",
     "postinstall": "prisma generate",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "verify:phase0": "tsx scripts/verify-phase0.ts",
+    "verify:phase1": "tsx scripts/verify-phase1.ts",
+    "verify:phase2": "tsx scripts/verify-phase2.ts",
+    "verify:phase3": "tsx scripts/verify-phase3.ts",
+    "verify:phase4": "tsx scripts/verify-phase4.ts",
+    "verify:phase5": "tsx scripts/verify-phase5.ts",
+    "verify:phase6": "tsx scripts/verify-phase6.ts",
+    "verify:stock-count": "tsx scripts/verify-stock-count.ts",
+    "check:legacy-adjustments": "tsx scripts/check-legacy-adjustments.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.109.1",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "@radix-ui/react-dialog": "^1.1.15",
