@@ -515,21 +515,15 @@ export default function POSPage() {
     })
   }
 
-  async function handleDownloadReceipt() {
-    const doc = await buildReceiptDoc()
-    if (!doc || !receipt) return
-    doc.save(`receipt-${receipt.orderId}.pdf`)
-    toast.success('Receipt downloaded')
-  }
-
   async function handlePrintReceipt() {
     const doc = await buildReceiptDoc()
     if (!doc) return
     const { printPDF } = await import('@/lib/pdf')
     printPDF(doc)
+    setReceipt(null)
   }
 
-  async function handleGenerateQuote(mode: 'download' | 'print' = 'download') {
+  async function handleGenerateQuote() {
     if (!quoteForm.customerName.trim()) {
       toast.error('Customer name is required')
       return
@@ -554,13 +548,8 @@ export default function POSPage() {
           unitPrice: i.unitPrice,
         })),
       })
-      if (mode === 'print') {
-        printPDF(doc)
-        toast.success('Sent to printer', { description: `Ref: ${quoteRef}` })
-      } else {
-        doc.save(`quotation-${quoteRef}.pdf`)
-        toast.success('Quotation downloaded', { description: `Ref: ${quoteRef}` })
-      }
+      printPDF(doc)
+      toast.success('Sent to printer', { description: `Ref: ${quoteRef}` })
       setQuoteOpen(false)
       setQuoteForm({ customerName: '', customerPhone: '', note: '' })
     } finally {
@@ -1051,20 +1040,15 @@ export default function POSPage() {
                 <div className="grid grid-cols-2 gap-2 mt-5">
                   <button
                     onClick={handlePrintReceipt}
-                    className="border border-gray-300 py-2.5 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-center gap-1.5"
+                    className="py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-1.5"
                   >
                     <Printer size={14} />
                     Print
                   </button>
-                  <button
-                    onClick={handleDownloadReceipt}
-                    className="border border-gray-300 py-2.5 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-center gap-1.5"
-                  >
-                    <FileText size={14} />
-                    Download
-                  </button>
                   <Dialog.Close asChild>
-                    <button className="col-span-2 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors">Done</button>
+                    <button className="border border-gray-300 py-2.5 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
+                      Cancel
+                    </button>
                   </Dialog.Close>
                 </div>
               </>
@@ -1128,26 +1112,20 @@ export default function POSPage() {
                 </div>
               </div>
             </div>
-            <div className="flex gap-2 mt-5">
-              <Dialog.Close asChild>
-                <button className="flex-1 border border-gray-300 py-2.5 rounded-xl text-sm text-gray-700 hover:bg-gray-50 transition-colors">Cancel</button>
-              </Dialog.Close>
+            <div className="grid grid-cols-2 gap-2 mt-5">
               <button
-                onClick={() => handleGenerateQuote('print')}
+                onClick={handleGenerateQuote}
                 disabled={quoteSending}
-                className="flex-1 border border-blue-600 text-blue-600 py-2.5 rounded-xl text-sm font-medium hover:bg-blue-50 disabled:opacity-40 transition-colors flex items-center justify-center gap-1.5"
+                className="py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-40 transition-colors flex items-center justify-center gap-1.5"
               >
                 <Printer size={14} />
                 {quoteSending ? '…' : 'Print'}
               </button>
-              <button
-                onClick={() => handleGenerateQuote('download')}
-                disabled={quoteSending}
-                className="flex-1 bg-blue-600 text-white py-2.5 rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-40 transition-colors flex items-center justify-center gap-1.5"
-              >
-                <FileText size={14} />
-                {quoteSending ? '…' : 'Download'}
-              </button>
+              <Dialog.Close asChild>
+                <button className="border border-gray-300 py-2.5 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
+                  Cancel
+                </button>
+              </Dialog.Close>
             </div>
           </Dialog.Content>
         </Dialog.Portal>
