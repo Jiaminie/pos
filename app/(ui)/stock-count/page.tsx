@@ -158,6 +158,7 @@ export default function StockCountPage() {
   const [dismissedKeys, setDismissedKeys] = useState<Record<string, true>>({})
   const [uploadedHashes, setUploadedHashes] = useState<Record<string, string>>({})
   const [activeTab, setActiveTab] = useState<'count' | 'photos'>('count')
+  const [showCountedOnly, setShowCountedOnly] = useState(false)
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all')
   const [reviewImageFilter, setReviewImageFilter] = useState<string>('all')
   const [pickerSearch, setPickerSearch] = useState<Record<string, string>>({})
@@ -416,8 +417,18 @@ export default function StockCountPage() {
     [drafts],
   )
 
+  // Products the user has actually entered a count for (typed or photo-derived).
+  const countedProductIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const [id, value] of Object.entries(countedQtys)) {
+      if (value?.trim()) ids.add(id)
+    }
+    return ids
+  }, [countedQtys])
+
   const visible = useMemo(() => {
     return products
+      .filter((product) => !showCountedOnly || countedProductIds.has(product.id))
       .filter((product) => filterCategoryId === 'all' || product.categoryId === filterCategoryId)
       .filter((product) => filterBrand === 'all' || getProductBrand(product) === filterBrand)
       .filter((product) =>
@@ -426,7 +437,16 @@ export default function StockCountPage() {
         }),
       )
       .sort((a, b) => a.name.localeCompare(b.name))
-  }, [products, filterCategoryId, filterBrand, nq, categoryMap, showBarcodeField])
+  }, [
+    products,
+    showCountedOnly,
+    countedProductIds,
+    filterCategoryId,
+    filterBrand,
+    nq,
+    categoryMap,
+    showBarcodeField,
+  ])
 
   const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE))
   const paginated = visible.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
@@ -1585,22 +1605,67 @@ export default function StockCountPage() {
           )}
         </div>
 
-        <p className="text-xs text-gray-500 mb-4">
-          {visible.length.toLocaleString()} product{visible.length === 1 ? '' : 's'}
-          {filterBrand !== 'all' ? ` · ${filterBrand}` : ''}
-        </p>
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
+            <button
+              type="button"
+              onClick={() => {
+                setShowCountedOnly(false)
+                setPage(1)
+              }}
+              className={`px-3 py-1.5 transition-colors ${
+                !showCountedOnly ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              All products
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowCountedOnly(true)
+                setPage(1)
+              }}
+              className={`px-3 py-1.5 border-l border-gray-200 transition-colors ${
+                showCountedOnly ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              Counted
+              <span
+                className={`ml-1.5 inline-flex items-center justify-center rounded-full text-[11px] px-1.5 min-w-5 ${
+                  showCountedOnly ? 'bg-white/25' : 'bg-gray-100 text-gray-700'
+                }`}
+              >
+                {countedProductIds.size}
+              </span>
+            </button>
+          </div>
+          <p className="text-xs text-gray-500">
+            {visible.length.toLocaleString()} product{visible.length === 1 ? '' : 's'}
+            {filterBrand !== 'all' ? ` · ${filterBrand}` : ''}
+          </p>
+        </div>
 
         {visible.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-gray-500">
             <Camera size={32} className="mb-3 opacity-40" />
-            <p className="text-sm font-medium">No products match your filters</p>
-            {(search || filterCategoryId !== 'all' || filterBrand !== 'all') && (
+            <p className="text-sm font-medium">
+              {showCountedOnly && countedProductIds.size === 0
+                ? 'Nothing counted yet'
+                : 'No products match your filters'}
+            </p>
+            {showCountedOnly && countedProductIds.size === 0 && (
+              <p className="text-xs mt-1 max-w-xs text-center">
+                Type a count against a product, or use Photo review — counted items will show here.
+              </p>
+            )}
+            {(search || filterCategoryId !== 'all' || filterBrand !== 'all' || showCountedOnly) && (
               <button
                 type="button"
                 onClick={() => {
                   handleSearch('')
                   setFilterCategoryId('all')
                   setFilterBrand('all')
+                  setShowCountedOnly(false)
                 }}
                 className="mt-2 text-xs text-blue-600 hover:underline"
               >
