@@ -133,7 +133,7 @@ export function PermissionsSection() {
                   </div>
                   {ROLES.map((role) => {
                     const gk = grantKey(role.id, perm.key)
-                    const checked = matrix.grants[gk] ?? perm.defaults[role.id]
+                    const checked = matrix.grants[gk] ?? false
                     const busy = saving === gk
                     return (
                       <div

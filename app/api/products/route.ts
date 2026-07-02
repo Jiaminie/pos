@@ -111,31 +111,48 @@ export async function POST(request: NextRequest) {
     let attemptSku: string = sku;
     for (let attempt = 0; ; attempt++) {
       try {
-        const product = await prisma.product.create({
-          data: {
-            // Use the client-generated UUID so IDB and server share the same id.
-            // Without this, the server mints a new UUID and stock transactions
-            // (which reference the client UUID) become orphaned on re-sync.
-            ...(id ? { id } : {}),
-            name,
-            sku: attemptSku,
-            barcode: barcode?.trim() || null,
-            brand: brand.trim().toUpperCase(),
-            sellingPrice,
-            // Optional: a user with product-manage + selling-price permission (but not
-            // cost) can create without a cost. Defaults to 0, to be filled in later.
-            costPrice: costPrice ?? 0,
-            lowestPrice: lowestPrice ?? null,
-            imageUrl: imageUrl ?? null,
-            category: category ?? null,
-            specification: specification ?? null,
-            stockUnit: stockUnit ?? null,
-            ...(unitId ? { unitId } : {}),
-            organizationId: user.orgId,
-          },
-          include: { unit: true },
-        });
-        return Response.json({ data: product, error: null }, { status: 201 });
+        const data = {
+          name,
+          sku: attemptSku,
+          barcode: barcode?.trim() || null,
+          brand: brand.trim().toUpperCase(),
+          sellingPrice,
+          costPrice: costPrice ?? 0,
+          lowestPrice: lowestPrice ?? null,
+          imageUrl: imageUrl ?? null,
+          category: category ?? null,
+          specification: specification ?? null,
+          stockUnit: stockUnit ?? null,
+          ...(unitId ? { unitId } : {}),
+          organizationId: user.orgId,
+        };
+
+        // Upsert when the client supplies an id — idempotent for offline retries
+        // and PATCH→POST fallback when the product exists only in IndexedDB.
+        const product = id
+          ? await prisma.product.upsert({
+              where: { id },
+              create: { id, ...data },
+              update: {
+                ...(name !== undefined && { name }),
+                ...(sku !== undefined && { sku: attemptSku }),
+                ...(barcode !== undefined && { barcode: barcode?.trim() || null }),
+                ...(brand !== undefined && { brand: brand.trim().toUpperCase() }),
+                ...(sellingPrice !== undefined && { sellingPrice }),
+                ...(costPrice !== undefined && { costPrice: costPrice ?? 0 }),
+                ...(lowestPrice !== undefined && { lowestPrice: lowestPrice ?? null }),
+                ...(imageUrl !== undefined && { imageUrl: imageUrl ?? null }),
+                ...(category !== undefined && { category: category ?? null }),
+                ...(specification !== undefined && { specification: specification ?? null }),
+                ...(stockUnit !== undefined && { stockUnit: stockUnit ?? null }),
+              },
+              include: { unit: true },
+            })
+          : await prisma.product.create({
+              data,
+              include: { unit: true },
+            });
+        return Response.json({ data: product, error: null }, { status: id ? 200 : 201 });
       } catch (err) {
         if (isSkuCollision(err) && attempt < 5) {
           attemptSku = `${sku}-${Math.random().toString(36).slice(2, 6)}`;

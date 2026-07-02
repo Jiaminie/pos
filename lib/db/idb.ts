@@ -3,7 +3,7 @@
 // Never unconditionally drop stores — that wipes user data.
 
 const DB_NAME = 'pos'
-const DB_VERSION = 9
+const DB_VERSION = 10
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
@@ -106,6 +106,11 @@ export function openDb(): Promise<IDBDatabase> {
 
       if (!db.objectStoreNames.contains('salesQueue')) {
         db.createObjectStore('salesQueue', { keyPath: 'id' })
+      }
+
+      // v10: product create/update sync queue
+      if (!db.objectStoreNames.contains('productSyncQueue')) {
+        db.createObjectStore('productSyncQueue', { keyPath: 'id' })
       }
     }
 

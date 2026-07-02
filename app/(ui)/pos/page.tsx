@@ -10,6 +10,7 @@ import { AlertCircle, ChevronDown, Eye, FileText, ImageOff, Minus, Plus, Printer
 import { toast } from 'sonner'
 import { createMany as createManyTransactions } from '@/lib/db/transactions'
 import { drain } from '@/lib/db/syncQueue'
+import { drain as drainProductSync } from '@/lib/db/productSyncQueue'
 import { create as createSale, type Sale } from '@/lib/db/sales'
 import { push as pushSale, drain as drainSales } from '@/lib/db/salesSyncQueue'
 import { getAll as getProducts } from '@/lib/db/products'
@@ -103,12 +104,13 @@ export default function POSPage() {
   }, [cart])
 
   useEffect(() => {
-    const onOnline = () => { setOffline(false); drain().catch(() => {}); drainIncident().catch(() => {}); drainSales().catch(() => {}) }
+    const onOnline = () => { setOffline(false); drain().catch(() => {}); drainProductSync().catch(() => {}); drainIncident().catch(() => {}); drainSales().catch(() => {}) }
     const onOffline = () => setOffline(true)
     queueMicrotask(() => setOffline(!navigator.onLine))
     window.addEventListener('online', onOnline)
     window.addEventListener('offline', onOffline)
     drain().catch(() => {})
+    drainProductSync().catch(() => {})
     drainIncident().catch(() => {})
     drainSales().catch(() => {})
     return () => {

@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/server/db";
 import { requireUser, isAuthUser, requireUserWithPermission } from "@/lib/server/auth/guard";
 import { hasPermission } from "@/lib/server/auth/permissions";
@@ -52,6 +53,9 @@ export async function PATCH(
 
     return Response.json({ data: product, error: null });
   } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
+      return Response.json({ data: null, error: "Product not found" }, { status: 404 });
+    }
     const message = err instanceof Error ? err.message : "Unknown error";
     return Response.json({ data: null, error: message }, { status: 500 });
   }

@@ -17,6 +17,7 @@ import { getAll as getCategories, upsertMany as upsertCategories } from '@/lib/d
 import { getAll as getUnits, upsertMany as upsertUnitsLocal } from '@/lib/db/units'
 import { createMany as createManyTx, getAll as getTransactions } from '@/lib/db/transactions'
 import { pushMany as pushManyTx, drain } from '@/lib/db/syncQueue'
+import { push as pushProductSync, drain as drainProductSync } from '@/lib/db/productSyncQueue'
 import { replaceCatalogFromServer, seedIfEmpty, syncFromServer } from '@/lib/db/seed'
 import type { CatalogSyncProgress } from '@/lib/db/sync-progress'
 import { initialSyncProgress } from '@/lib/db/sync-progress'
@@ -26,6 +27,7 @@ import { getBrandOptions, getProductBrand, matchesProductSearch, normalizeBrand 
 import { barcodeSearchEnabled } from '@/lib/product-search'
 import { effectiveLowestPrice, maxDiscountPerUnit, DEFAULT_MIN_MARKUP_PERCENT } from '@/lib/pricing'
 import { fetchSettings, type PosLookupMode } from '@/lib/settings'
+import { fetchMe, getCachedAuthUser, hasPermission, type AuthUser } from '@/lib/auth'
 import { buildStockByProductId, LOW_STOCK_THRESHOLD } from '@/lib/stock'
 import type { Product, ProductCategory, InventoryTransaction, Unit, TransactionSource } from '@/lib/types'
 
@@ -129,7 +131,9 @@ function ProductsPageContent() {
   const [page, setPage] = useState(1)
   const [minMarkupPercent, setMinMarkupPercent] = useState(DEFAULT_MIN_MARKUP_PERCENT)
   const [posLookupMode, setPosLookupMode] = useState<PosLookupMode>('catalog')
+  const [authUser, setAuthUser] = useState<AuthUser | null>(() => getCachedAuthUser())
   const showBarcodeField = barcodeSearchEnabled(posLookupMode)
+  const canSetCostPrice = hasPermission(authUser, 'catalog.price.cost_and_floor')
 
   async function refreshCatalogFromServer() {
     setRefreshing(true)
@@ -191,10 +195,16 @@ function ProductsPageContent() {
 
   useEffect(() => {
     loadCatalog()
+    fetchMe().then(setAuthUser).catch(() => {})
     fetchSettings().then((s) => {
       setMinMarkupPercent(s.minMarkupPercent)
       setPosLookupMode(s.posLookupMode)
     }).catch(() => {})
+
+    const onOnline = () => { drainProductSync().catch(() => {}) }
+    window.addEventListener('online', onOnline)
+    drainProductSync().catch(() => {})
+    return () => window.removeEventListener('online', onOnline)
   }, [])
 
   useEffect(() => {
@@ -381,6 +391,41 @@ function ProductsPageContent() {
     setOpen(true)
   }
 
+  function buildProductSyncBody(input: {
+    name: string
+    sku: string
+    specification?: string
+    sellingPrice: number
+    costPrice: number
+    lowestPrice?: number
+    categoryName: string | null
+    brand: string
+    imageUrl?: string
+    barcodeValue?: string
+  }): Record<string, unknown> {
+    const body: Record<string, unknown> = {
+      name: input.name,
+      sku: input.sku,
+      specification: input.specification ?? null,
+      sellingPrice: input.sellingPrice,
+      category: input.categoryName,
+      brand: input.brand,
+      imageUrl: input.imageUrl ?? null,
+      ...(showBarcodeField ? { barcode: input.barcodeValue ?? null } : {}),
+    }
+    // Cost/floor are owner-only — omit so the server skips that permission check.
+    if (canSetCostPrice) {
+      body.costPrice = input.costPrice
+      body.lowestPrice = input.lowestPrice ?? null
+    }
+    return body
+  }
+
+  async function queueProductSync(productId: string, method: 'POST' | 'PATCH', body: Record<string, unknown>) {
+    await pushProductSync({ id: productId, method, body })
+    await drainProductSync()
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
@@ -448,24 +493,22 @@ function ProductsPageContent() {
         }
         await upsertMany([updated])
         setProducts((prev) => prev.map((p) => p.id === updated.id ? updated : p))
-        fetch(`/api/products/${editingProduct.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        void queueProductSync(
+          editingProduct.id,
+          'PATCH',
+          buildProductSyncBody({
             name: updated.name,
             sku: updated.sku,
-            specification: updated.specification ?? null,
+            specification: updated.specification,
             sellingPrice: updated.sellingPrice,
             costPrice: updated.costPrice,
-            lowestPrice: updated.lowestPrice ?? null,
-            category: categoryName,
+            lowestPrice: updated.lowestPrice,
+            categoryName,
             brand: updated.brand,
-            imageUrl: updated.imageUrl ?? null,
-            ...(showBarcodeField ? { barcode: updated.barcode ?? null } : {}),
+            imageUrl: updated.imageUrl,
+            barcodeValue: updated.barcode,
           }),
-        }).then((res) => {
-          if (!res.ok) toast.error('Saved locally — sync to server failed, will retry')
-        }).catch(() => {
+        ).catch(() => {
           toast.error('Saved locally — sync to server failed, will retry')
         })
 
@@ -530,26 +573,20 @@ function ProductsPageContent() {
         setProducts((prev) => [product, ...prev])
         setPage(1)
         toast.success('Product saved')
-        fetch('/api/products', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: product.id,
-            name: product.name,
-            sku: product.sku,
-            specification: product.specification ?? null,
-            unitId: product.unitId ?? null,
-            sellingPrice: product.sellingPrice,
-            costPrice: product.costPrice,
-            lowestPrice: product.lowestPrice ?? null,
-            category: categoryName,
-            brand: product.brand,
-            imageUrl: product.imageUrl ?? null,
-            ...(barcodeValue ? { barcode: barcodeValue } : {}),
-          }),
-        }).then((res) => {
-          if (!res.ok) toast.error('Saved locally — sync to server failed, will retry')
-        }).catch(() => {
+        const createBody = buildProductSyncBody({
+          name: product.name,
+          sku: product.sku,
+          specification: product.specification,
+          sellingPrice: product.sellingPrice,
+          costPrice: product.costPrice,
+          lowestPrice: product.lowestPrice,
+          categoryName,
+          brand: product.brand,
+          imageUrl: product.imageUrl,
+          barcodeValue: barcodeValue,
+        })
+        if (product.unitId) createBody.unitId = product.unitId
+        void queueProductSync(product.id, 'POST', createBody).catch(() => {
           toast.error('Saved locally — sync to server failed, will retry')
         })
       }

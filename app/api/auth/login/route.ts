@@ -4,6 +4,7 @@ import { verifyPin, validatePinFormat } from '@/lib/server/auth/pin'
 import { createSession } from '@/lib/server/auth/session'
 import { clearAttempts, isLockedOut, recordFailedAttempt } from '@/lib/server/auth/lockout'
 import { logAudit } from '@/lib/server/audit'
+import { getEffectivePermissions } from '@/lib/server/auth/permissions'
 import type { Role } from '@prisma/client'
 
 function callerId(request: NextRequest): string {
@@ -96,6 +97,16 @@ export async function POST(request: NextRequest) {
       metadata: { role: matched.role },
     })
 
+    const permissions = [
+      ...(await getEffectivePermissions({
+        userId: matched.id,
+        name: matched.name,
+        role: matched.role,
+        branchId: sessionBranchId,
+        orgId: matched.organizationId,
+      })),
+    ]
+
     return Response.json({
       data: {
         userId: matched.id,
@@ -103,6 +114,7 @@ export async function POST(request: NextRequest) {
         role: matched.role,
         branchId: sessionBranchId,
         orgId: matched.organizationId,
+        permissions,
       },
       error: null,
     })

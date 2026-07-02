@@ -1,3 +1,5 @@
+import { getPermissionMeta, isPermissionKey, type PermissionKey as CatalogPermissionKey } from './permissions'
+
 const AUTH_CACHE_KEY = 'pos_auth_user'
 
 export type PermissionKey = string
@@ -74,8 +76,17 @@ export function canViewReports(user: AuthUser): boolean {
   )
 }
 
+
 export function hasPermission(user: AuthUser | null, key: PermissionKey): boolean {
   if (!user) return false
   if (user.role === 'OWNER') return true
-  return user.permissions?.includes(key) ?? false
+  if (user.permissions?.includes(key)) return true
+  // Legacy sessions cached before login included permissions — match server defaults.
+  if (!user.permissions && isPermissionKey(key)) {
+    const meta = getPermissionMeta(key as CatalogPermissionKey)
+    if (meta?.togglable && (user.role === 'MANAGER' || user.role === 'CASHIER')) {
+      return meta.defaults[user.role]
+    }
+  }
+  return false
 }
