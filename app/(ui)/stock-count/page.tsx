@@ -11,6 +11,8 @@ import {
   ImagePlus,
   Loader2,
   Link2,
+  PackagePlus,
+  Pencil,
   Search,
   SkipForward,
   Trash2,
@@ -37,13 +39,20 @@ import {
   subtractAggregates,
   applyResumeDraftsToCounts,
 } from '@/lib/stock-count/aggregate'
+import { matchProduct } from '@/lib/stock-count/match'
 import {
   buildAdjustmentTransactions,
   computePendingAdjustments,
   getRowDelta as computeRowDelta,
   round2,
 } from '@/lib/stock-count/manual'
-import type { ReviewFilter, StockCountUpload, UnmatchedReviewRow } from '@/lib/stock-count/types'
+import { createStockCountProduct } from '@/lib/stock-count/newProduct'
+import type {
+  ExtractedStockCountRow,
+  ReviewFilter,
+  StockCountUpload,
+  UnmatchedReviewRow,
+} from '@/lib/stock-count/types'
 import {
   completeStockCountUploads,
   extractStockCountPhotos,
@@ -53,10 +62,12 @@ import {
   hashFile,
   loadDismissedRowKeys,
   loadResolvedProductMap,
+  loadRowEdits,
   loadUploadedHashes,
   parseExtractedRows,
   saveDismissedRowKeys,
   saveResolvedProductMap,
+  saveRowEdits,
   saveUploadedHashes,
   STALE_DRAFT_MS,
   uploadToCloudinary,
@@ -68,6 +79,33 @@ import { buildStockByProductId } from '@/lib/stock'
 import type { InventoryTransaction, Product, ProductCategory } from '@/lib/types'
 
 const PAGE_SIZE = 30
+
+type NewItemForm = {
+  name: string
+  sellingPrice: string
+  costPrice: string
+  categoryId: string
+  brand: string
+  specification: string
+}
+
+const emptyNewItemForm: NewItemForm = {
+  name: '',
+  sellingPrice: '',
+  costPrice: '',
+  categoryId: '',
+  brand: '',
+  specification: '',
+}
+
+type EditRowForm = {
+  description: string
+  qty: string
+  sizeType: string
+  company: string
+}
+
+const emptyEditForm: EditRowForm = { description: '', qty: '', sizeType: '', company: '' }
 
 function formatDelta(delta: number): string {
   if (delta > 0) return `+${delta}`
@@ -120,11 +158,19 @@ export default function StockCountPage() {
   const [dismissedKeys, setDismissedKeys] = useState<Record<string, true>>({})
   const [uploadedHashes, setUploadedHashes] = useState<Record<string, string>>({})
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all')
+  const [reviewImageFilter, setReviewImageFilter] = useState<string>('all')
   const [pickerSearch, setPickerSearch] = useState<Record<string, string>>({})
   const [openPickerKey, setOpenPickerKey] = useState<string | null>(null)
+  const [newItemKey, setNewItemKey] = useState<string | null>(null)
+  const [newItemForm, setNewItemForm] = useState<NewItemForm>(emptyNewItemForm)
+  const [creatingItem, setCreatingItem] = useState(false)
+  const [rowEdits, setRowEdits] = useState<Record<string, ExtractedStockCountRow>>({})
+  const [editKey, setEditKey] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState<EditRowForm>(emptyEditForm)
 
   const photoAppliedRef = useRef<Set<string>>(new Set())
   const submittingRef = useRef(false)
+  const creatingItemRef = useRef(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Guards the persistence effect below from writing an empty {} over storage
   // before the resume-drafts fetch in loadCatalog has had a chance to hydrate it.
@@ -135,7 +181,7 @@ export default function StockCountPage() {
     resolved: Record<string, string>,
   ) {
     if (photoAppliedRef.current.has(upload.id)) return
-    const aggregates = computeUploadAggregates(upload, products, resolved)
+    const aggregates = computeUploadAggregates(upload, products, resolved, rowEdits)
     if (aggregates.size === 0) {
       photoAppliedRef.current.add(upload.id)
       return
@@ -177,6 +223,10 @@ export default function StockCountPage() {
         if (Object.keys(dismissedFromStorage).length > 0) {
           setDismissedKeys((prev) => ({ ...dismissedFromStorage, ...prev }))
         }
+        const editsFromStorage = loadRowEdits(branchId)
+        if (Object.keys(editsFromStorage).length > 0) {
+          setRowEdits((prev) => ({ ...editsFromStorage, ...prev }))
+        }
         // Keep only dedup hashes whose upload is still in the active count —
         // submitted/discarded/expired drafts drop out, so re-uploading their
         // image later is allowed and the map stays bounded.
@@ -186,7 +236,12 @@ export default function StockCountPage() {
           if (resumeIds.has(id)) prunedHashes[hash] = id
         }
         setUploadedHashes(prunedHashes)
-        const resumeAggregates = applyResumeDraftsToCounts(resume, prods, resolvedFromStorage)
+        const resumeAggregates = applyResumeDraftsToCounts(
+          resume,
+          prods,
+          resolvedFromStorage,
+          editsFromStorage,
+        )
         if (resumeAggregates.size > 0) {
           setCountedQtys((prev) => mergePhotoAggregatesIntoCounts(prev, resumeAggregates))
         }
@@ -244,6 +299,11 @@ export default function StockCountPage() {
     saveUploadedHashes(myBranchId, uploadedHashes)
   }, [uploadedHashes, myBranchId])
 
+  useEffect(() => {
+    if (!myBranchId || !hydratedResolvedRef.current) return
+    saveRowEdits(myBranchId, rowEdits)
+  }, [rowEdits, myBranchId])
+
   const categoryMap = useMemo(
     () => Object.fromEntries(categories.map((c) => [c.id, c.name])),
     [categories],
@@ -270,6 +330,15 @@ export default function StockCountPage() {
   const nq = normalizeQuery(deferredSearch.trim())
   const showBarcodeField = barcodeSearchEnabled(posLookupMode)
 
+  // Field-level product permissions. name/brand/category/spec are covered by
+  // catalog.product.manage; each price has its own permission. Creating needs the
+  // required fields (manage + a selling price); cost is optional, so its field is
+  // hidden — not blocking — for users without cost permission.
+  const canManageProducts = hasPermission(authUser, 'catalog.product.manage')
+  const canSetSellingPrice = hasPermission(authUser, 'catalog.price.selling')
+  const canSetCostPrice = hasPermission(authUser, 'catalog.price.cost_and_floor')
+  const canCreateProduct = canManageProducts && canSetSellingPrice
+
   const stockByProductId = useMemo(
     () => buildStockByProductId(products, transactions, myBranchId ?? undefined),
     [products, transactions, myBranchId],
@@ -277,16 +346,69 @@ export default function StockCountPage() {
 
   const unmatchedRows = useMemo(
     () =>
-      buildUnmatchedReviewRows(drafts, products, resolvedByKey).filter(
-        (row) => !dismissedKeys[row.key],
-      ),
-    [drafts, products, resolvedByKey, dismissedKeys],
+      buildUnmatchedReviewRows(drafts, products, resolvedByKey)
+        .filter((row) => !dismissedKeys[row.key])
+        .map((row) => {
+          const edit = rowEdits[row.key]
+          if (!edit) return row
+          // Re-match on the corrected text so fixing a typo can surface the
+          // right suggestion; keep the row in the queue for explicit confirm.
+          const match = matchProduct(edit.description, products)
+          return {
+            ...row,
+            row: edit,
+            status: match.status,
+            suggestedProductId: match.productId,
+            suggestedProductName: match.productName,
+          }
+        }),
+    [drafts, products, resolvedByKey, dismissedKeys, rowEdits],
+  )
+
+  // One entry per source photo that still has rows needing review, in draft order.
+  const reviewImageGroups = useMemo(() => {
+    const byUpload = new Map<string, { uploadId: string; imageUrl: string; count: number }>()
+    for (const row of unmatchedRows) {
+      const existing = byUpload.get(row.uploadId)
+      if (existing) existing.count++
+      else byUpload.set(row.uploadId, { uploadId: row.uploadId, imageUrl: row.imageUrl, count: 1 })
+    }
+    const order = new Map(drafts.map((d, i) => [d.id, i]))
+    return [...byUpload.values()].sort(
+      (a, b) => (order.get(a.uploadId) ?? 0) - (order.get(b.uploadId) ?? 0),
+    )
+  }, [unmatchedRows, drafts])
+
+  // Ignore an image filter whose photo no longer has rows (e.g. all resolved).
+  const activeImageFilter =
+    reviewImageFilter !== 'all' && reviewImageGroups.some((g) => g.uploadId === reviewImageFilter)
+      ? reviewImageFilter
+      : 'all'
+
+  // Counts on each filter dimension reflect the OTHER dimension's active choice,
+  // so e.g. the status tabs show counts within the selected photo (not global).
+  const imageScopedRows = useMemo(
+    () =>
+      activeImageFilter === 'all'
+        ? unmatchedRows
+        : unmatchedRows.filter((row) => row.uploadId === activeImageFilter),
+    [unmatchedRows, activeImageFilter],
+  )
+  const statusScopedRows = useMemo(
+    () =>
+      reviewFilter === 'all'
+        ? unmatchedRows
+        : unmatchedRows.filter((row) => row.status === reviewFilter),
+    [unmatchedRows, reviewFilter],
   )
 
   const filteredReviewRows = useMemo(() => {
-    if (reviewFilter === 'all') return unmatchedRows
-    return unmatchedRows.filter((row) => row.status === reviewFilter)
-  }, [unmatchedRows, reviewFilter])
+    return unmatchedRows.filter(
+      (row) =>
+        (reviewFilter === 'all' || row.status === reviewFilter) &&
+        (activeImageFilter === 'all' || row.uploadId === activeImageFilter),
+    )
+  }, [unmatchedRows, reviewFilter, activeImageFilter])
 
   const staleDrafts = useMemo(
     () => drafts.filter((d) => Date.now() - new Date(d.createdAt).getTime() > STALE_DRAFT_MS),
@@ -418,9 +540,16 @@ export default function StockCountPage() {
 
     try {
       await completeStockCountUploads(branchId, [uploadId], 'DISCARDED')
-      const aggregates = computeUploadAggregates(upload, products, resolvedByKey)
+      const aggregates = computeUploadAggregates(upload, products, resolvedByKey, rowEdits)
       setCountedQtys((prev) => subtractAggregates(prev, aggregates))
       setResolvedByKey((prev) => clearResolvedKeysForUpload(prev, uploadId))
+      setRowEdits((prev) => {
+        const next = { ...prev }
+        for (const key of Object.keys(next)) {
+          if (key.startsWith(`${uploadId}:`)) delete next[key]
+        }
+        return next
+      })
       // Free the dedup hash so re-uploading this image is allowed after discard.
       setUploadedHashes((prev) => {
         const next = { ...prev }
@@ -471,6 +600,117 @@ export default function StockCountPage() {
     handleResolveRow(item.key, item.suggestedProductId, item.row.qty)
   }
 
+  function openEdit(item: UnmatchedReviewRow) {
+    setOpenPickerKey(null)
+    setNewItemKey(null)
+    setEditForm({
+      description: item.row.description,
+      qty: String(item.row.qty),
+      sizeType: item.row.sizeType ?? '',
+      company: item.row.company ?? '',
+    })
+    setEditKey(item.key)
+  }
+
+  function closeEdit() {
+    setEditKey(null)
+    setEditForm(emptyEditForm)
+  }
+
+  function handleSaveEdit(item: UnmatchedReviewRow) {
+    const description = editForm.description.trim()
+    if (!description) {
+      toast.error('Description is required')
+      return
+    }
+    const qty = parseFloat(editForm.qty)
+    if (Number.isNaN(qty) || qty < 0) {
+      toast.error('Enter a valid quantity')
+      return
+    }
+    const edited: ExtractedStockCountRow = {
+      ...item.row,
+      description,
+      qty: round2(qty),
+      sizeType: editForm.sizeType.trim() || null,
+      company: editForm.company.trim() || null,
+    }
+    setRowEdits((prev) => ({ ...prev, [item.key]: edited }))
+    closeEdit()
+  }
+
+  function openNewItem(item: UnmatchedReviewRow) {
+    setOpenPickerKey(null)
+    setEditKey(null)
+    setNewItemForm({
+      ...emptyNewItemForm,
+      name: item.row.description,
+      specification: item.row.sizeType ?? '',
+      brand: item.row.company ?? '',
+    })
+    setNewItemKey(item.key)
+  }
+
+  function closeNewItem() {
+    setNewItemKey(null)
+    setNewItemForm(emptyNewItemForm)
+  }
+
+  async function handleCreateNewItem(item: UnmatchedReviewRow) {
+    // Ref guard closes the double-click window before `creatingItem` state (and
+    // the button's disabled attr) has re-rendered — otherwise two fast clicks
+    // could create two products for one row.
+    if (creatingItemRef.current) return
+    const name = newItemForm.name.trim()
+    if (!name) {
+      toast.error('Product name is required')
+      return
+    }
+    const sellingPrice = parseFloat(newItemForm.sellingPrice)
+    if (Number.isNaN(sellingPrice) || sellingPrice < 0) {
+      toast.error('Enter a selling price')
+      return
+    }
+    // Only include cost when the user is allowed to set it (otherwise the field
+    // is hidden and the server defaults the stored cost to 0).
+    let costPrice: number | undefined
+    if (canSetCostPrice && newItemForm.costPrice.trim()) {
+      costPrice = parseFloat(newItemForm.costPrice)
+      if (Number.isNaN(costPrice) || costPrice < 0) {
+        toast.error('Cost price is not a valid number')
+        return
+      }
+    }
+
+    creatingItemRef.current = true
+    setCreatingItem(true)
+    try {
+      const product = await createStockCountProduct(
+        {
+          name,
+          sellingPrice,
+          costPrice,
+          categoryId: newItemForm.categoryId || undefined,
+          categoryName: categories.find((c) => c.id === newItemForm.categoryId)?.name ?? null,
+          brand: newItemForm.brand,
+          specification: newItemForm.specification,
+        },
+        products.map((p) => p.sku),
+      )
+      setProducts((prev) => [product, ...prev])
+      // Link the row to the new product — its counted qty then flows through the
+      // normal submit as an ADJUSTMENT (new product's system stock is 0).
+      handleResolveRow(item.key, product.id, item.row.qty)
+      closeNewItem()
+      toast.success(`Added “${product.name}” and counted ${item.row.qty}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not create product')
+    } finally {
+      creatingItemRef.current = false
+      setCreatingItem(false)
+    }
+  }
+
   async function handleSubmit() {
     if (submittingRef.current || pendingAdjustments.length === 0) return
 
@@ -506,6 +746,7 @@ export default function StockCountPage() {
         drafts,
         products,
         resolvedByKey,
+        rowEdits,
       )
 
       if (contributingDraftIds.length > 0) {
@@ -516,6 +757,13 @@ export default function StockCountPage() {
             let next = prev
             for (const id of contributingDraftIds) {
               next = clearResolvedKeysForUpload(next, id)
+            }
+            return next
+          })
+          setRowEdits((prev) => {
+            const next = { ...prev }
+            for (const key of Object.keys(next)) {
+              if (contributingDraftIds.some((id) => key.startsWith(`${id}:`))) delete next[key]
             }
             return next
           })
@@ -599,8 +847,172 @@ export default function StockCountPage() {
     )
   }
 
+  function renderNewItemForm(item: UnmatchedReviewRow) {
+    const set = (patch: Partial<NewItemForm>) => setNewItemForm((f) => ({ ...f, ...patch }))
+    return (
+      <div className="rounded-lg border border-gray-200 bg-white p-3">
+        <p className="text-xs font-medium text-gray-700 mb-2">
+          New product · counts {item.row.qty} on submit
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <label className="text-xs text-gray-500 sm:col-span-2">
+            Name
+            <input
+              type="text"
+              value={newItemForm.name}
+              onChange={(e) => set({ name: e.target.value })}
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+          <label className="text-xs text-gray-500">
+            Selling price <span className="text-red-500">*</span>
+            <input
+              type="number"
+              inputMode="decimal"
+              step="any"
+              min="0"
+              value={newItemForm.sellingPrice}
+              onChange={(e) => set({ sellingPrice: e.target.value })}
+              placeholder="0.00"
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+          {canSetCostPrice && (
+            <label className="text-xs text-gray-500">
+              Cost price <span className="text-gray-400">(optional)</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="any"
+                min="0"
+                value={newItemForm.costPrice}
+                onChange={(e) => set({ costPrice: e.target.value })}
+                placeholder="0.00"
+                className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </label>
+          )}
+          <label className="text-xs text-gray-500">
+            Category <span className="text-gray-400">(optional)</span>
+            <select
+              value={newItemForm.categoryId}
+              onChange={(e) => set({ categoryId: e.target.value })}
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Uncategorized (set later)</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs text-gray-500">
+            Brand <span className="text-gray-400">(optional)</span>
+            <input
+              type="text"
+              value={newItemForm.brand}
+              onChange={(e) => set({ brand: e.target.value })}
+              placeholder="UNBRANDED"
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+        </div>
+        <div className="flex items-center gap-2 mt-3">
+          <button
+            type="button"
+            disabled={creatingItem}
+            onClick={() => void handleCreateNewItem(item)}
+            className="inline-flex items-center gap-1 rounded-lg bg-blue-600 text-white px-3 py-1.5 text-xs font-medium hover:bg-blue-700 disabled:opacity-50"
+          >
+            {creatingItem ? <Loader2 size={14} className="animate-spin" /> : <PackagePlus size={14} />}
+            Create &amp; count
+          </button>
+          <button
+            type="button"
+            onClick={closeNewItem}
+            className="inline-flex items-center gap-1 rounded-lg border border-gray-300 text-gray-600 px-3 py-1.5 text-xs font-medium hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  function renderEditForm(item: UnmatchedReviewRow) {
+    const set = (patch: Partial<EditRowForm>) => setEditForm((f) => ({ ...f, ...patch }))
+    return (
+      <div className="rounded-lg border border-gray-200 bg-white p-3">
+        <p className="text-xs font-medium text-gray-700 mb-2">
+          Correct what was read from the photo
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <label className="text-xs text-gray-500 sm:col-span-2">
+            Description
+            <input
+              type="text"
+              value={editForm.description}
+              onChange={(e) => set({ description: e.target.value })}
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+          <label className="text-xs text-gray-500">
+            Quantity
+            <input
+              type="number"
+              inputMode="decimal"
+              step="any"
+              min="0"
+              value={editForm.qty}
+              onChange={(e) => set({ qty: e.target.value })}
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+          <label className="text-xs text-gray-500">
+            Size / type <span className="text-gray-400">(optional)</span>
+            <input
+              type="text"
+              value={editForm.sizeType}
+              onChange={(e) => set({ sizeType: e.target.value })}
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+          <label className="text-xs text-gray-500">
+            Company / brand <span className="text-gray-400">(optional)</span>
+            <input
+              type="text"
+              value={editForm.company}
+              onChange={(e) => set({ company: e.target.value })}
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+        </div>
+        <div className="flex items-center gap-2 mt-3">
+          <button
+            type="button"
+            onClick={() => handleSaveEdit(item)}
+            className="inline-flex items-center gap-1 rounded-lg bg-blue-600 text-white px-3 py-1.5 text-xs font-medium hover:bg-blue-700"
+          >
+            <Check size={14} /> Save correction
+          </button>
+          <button
+            type="button"
+            onClick={closeEdit}
+            className="inline-flex items-center gap-1 rounded-lg border border-gray-300 text-gray-600 px-3 py-1.5 text-xs font-medium hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   function renderReviewRow(item: UnmatchedReviewRow) {
     const pickerOpen = openPickerKey === item.key
+    const newItemOpen = newItemKey === item.key
+    const editOpen = editKey === item.key
+    const edited = Boolean(rowEdits[item.key])
     return (
       <Fragment key={item.key}>
         <tr className="hover:bg-gray-50 align-top">
@@ -618,6 +1030,11 @@ export default function StockCountPage() {
             >
               {reviewStatusLabel(item.status)}
             </span>
+            {edited && (
+              <span className="ml-1 inline-block text-[10px] font-medium uppercase tracking-wide px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                Edited
+              </span>
+            )}
             <p className="font-medium text-gray-900">{item.row.description}</p>
           </td>
           <td className="px-4 py-3 text-right tabular-nums text-gray-700">{item.row.qty}</td>
@@ -638,7 +1055,11 @@ export default function StockCountPage() {
               )}
               <button
                 type="button"
-                onClick={() => setOpenPickerKey(pickerOpen ? null : item.key)}
+                onClick={() => {
+                  setNewItemKey(null)
+                  setEditKey(null)
+                  setOpenPickerKey(pickerOpen ? null : item.key)
+                }}
                 className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
                   pickerOpen
                     ? 'border-blue-300 bg-blue-50 text-blue-700'
@@ -647,6 +1068,32 @@ export default function StockCountPage() {
               >
                 <Link2 size={14} /> Link
               </button>
+              <button
+                type="button"
+                onClick={() => (editOpen ? closeEdit() : openEdit(item))}
+                className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  editOpen
+                    ? 'border-blue-300 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                }`}
+                title="Correct what the photo transcription got wrong"
+              >
+                <Pencil size={14} /> Edit
+              </button>
+              {canCreateProduct && (
+                <button
+                  type="button"
+                  onClick={() => (newItemOpen ? closeNewItem() : openNewItem(item))}
+                  className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                    newItemOpen
+                      ? 'border-blue-300 bg-blue-50 text-blue-700'
+                      : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                  }`}
+                  title="Create a new product from this row"
+                >
+                  <PackagePlus size={14} /> New item
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => handleSkipRow(item.key)}
@@ -658,11 +1105,17 @@ export default function StockCountPage() {
             </div>
           </td>
         </tr>
-        {pickerOpen && (
+        {(pickerOpen || newItemOpen || editOpen) && (
           <tr className="bg-gray-50/60">
             <td />
             <td colSpan={4} className="px-4 pb-3">
-              <div className="max-w-md">{renderProductPicker(item)}</div>
+              <div className={newItemOpen || editOpen ? 'max-w-2xl' : 'max-w-md'}>
+                {editOpen
+                  ? renderEditForm(item)
+                  : newItemOpen
+                    ? renderNewItemForm(item)
+                    : renderProductPicker(item)}
+              </div>
             </td>
           </tr>
         )}
@@ -672,6 +1125,9 @@ export default function StockCountPage() {
 
   function renderReviewCard(item: UnmatchedReviewRow) {
     const pickerOpen = openPickerKey === item.key
+    const newItemOpen = newItemKey === item.key
+    const editOpen = editKey === item.key
+    const edited = Boolean(rowEdits[item.key])
     return (
       <div key={item.key} className="p-4 flex gap-3">
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -687,6 +1143,11 @@ export default function StockCountPage() {
             >
               {reviewStatusLabel(item.status)}
             </span>
+            {edited && (
+              <span className="text-[10px] font-medium uppercase tracking-wide px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                Edited
+              </span>
+            )}
             <span className="text-sm font-medium text-gray-900 truncate">{item.row.description}</span>
             <span className="text-sm tabular-nums text-gray-600">× {item.row.qty}</span>
           </div>
@@ -705,7 +1166,11 @@ export default function StockCountPage() {
             )}
             <button
               type="button"
-              onClick={() => setOpenPickerKey(pickerOpen ? null : item.key)}
+              onClick={() => {
+                setNewItemKey(null)
+                setEditKey(null)
+                setOpenPickerKey(pickerOpen ? null : item.key)
+              }}
               className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium ${
                 pickerOpen
                   ? 'border-blue-300 bg-blue-50 text-blue-700'
@@ -716,13 +1181,43 @@ export default function StockCountPage() {
             </button>
             <button
               type="button"
+              onClick={() => (editOpen ? closeEdit() : openEdit(item))}
+              className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium ${
+                editOpen
+                  ? 'border-blue-300 bg-blue-50 text-blue-700'
+                  : 'border-gray-300 text-gray-700'
+              }`}
+            >
+              <Pencil size={14} /> Edit
+            </button>
+            {canCreateProduct && (
+              <button
+                type="button"
+                onClick={() => (newItemOpen ? closeNewItem() : openNewItem(item))}
+                className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium ${
+                  newItemOpen
+                    ? 'border-blue-300 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 text-gray-700'
+                }`}
+              >
+                <PackagePlus size={14} /> New item
+              </button>
+            )}
+            <button
+              type="button"
               onClick={() => handleSkipRow(item.key)}
               className="inline-flex items-center gap-1 rounded-lg border border-gray-300 text-gray-500 px-2.5 py-1.5 text-xs font-medium hover:text-red-600"
             >
               <SkipForward size={14} /> Skip
             </button>
           </div>
-          {pickerOpen && <div className="mt-2">{renderProductPicker(item)}</div>}
+          {editOpen ? (
+            <div className="mt-2">{renderEditForm(item)}</div>
+          ) : newItemOpen ? (
+            <div className="mt-2">{renderNewItemForm(item)}</div>
+          ) : (
+            pickerOpen && <div className="mt-2">{renderProductPicker(item)}</div>
+          )}
         </div>
       </div>
     )
@@ -911,15 +1406,58 @@ export default function StockCountPage() {
                     {reviewStatusLabel(f)}
                     {f !== 'all' && (
                       <span className="ml-1 opacity-80">
-                        ({unmatchedRows.filter((r) => r.status === f).length})
+                        ({imageScopedRows.filter((r) => r.status === f).length})
                       </span>
                     )}
                     {f === 'all' && (
-                      <span className="ml-1 opacity-80">({unmatchedRows.length})</span>
+                      <span className="ml-1 opacity-80">({imageScopedRows.length})</span>
                     )}
                   </button>
                 ))}
               </div>
+
+              {reviewImageGroups.length > 1 && (
+                <div className="flex flex-wrap items-center gap-1.5 mt-3">
+                  <span className="text-[11px] text-gray-500 mr-0.5">Photo:</span>
+                  <button
+                    type="button"
+                    onClick={() => setReviewImageFilter('all')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                      activeImageFilter === 'all'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    All photos ({statusScopedRows.length})
+                  </button>
+                  {reviewImageGroups.map((group, i) => {
+                    const count = statusScopedRows.filter(
+                      (r) => r.uploadId === group.uploadId,
+                    ).length
+                    return (
+                    <button
+                      key={group.uploadId}
+                      type="button"
+                      onClick={() => setReviewImageFilter(group.uploadId)}
+                      title={`Photo ${i + 1} — ${count} row${count === 1 ? '' : 's'}`}
+                      className={`inline-flex items-center gap-1.5 pl-1 pr-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                        activeImageFilter === group.uploadId
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={group.imageUrl}
+                        alt=""
+                        className="w-6 h-6 rounded object-cover ring-1 ring-black/10"
+                      />
+                      #{i + 1} ({count})
+                    </button>
+                    )
+                  })}
+                </div>
+              )}
             </div>
             {filteredReviewRows.length === 0 ? (
               <p className="px-4 py-6 text-sm text-gray-500 text-center">No rows in this filter</p>

@@ -4,6 +4,11 @@ import { parseExtractedRows } from './upload'
 import type { ExtractedStockCountRow, StockCountUpload, UnmatchedReviewRow } from './types'
 import type { Product } from '@/lib/types'
 
+/** Manual per-row corrections, keyed by rowKey. Overrides the transcribed row
+ *  (notably its quantity) everywhere counts are computed, so an edited qty isn't
+ *  silently reverted to the original on resume/discard/submit. */
+export type RowEditsByKey = Record<string, ExtractedStockCountRow>
+
 export function rowKey(uploadId: string, index: number): string {
   return `${uploadId}:${index}`
 }
@@ -24,19 +29,24 @@ function matchUploadRows(
   upload: StockCountUpload,
   products: Product[],
   resolvedProductByKey: Record<string, string>,
+  rowEditsByKey: RowEditsByKey = {},
 ): MatchedRow[] {
   const rows = parseExtractedRows(upload.extractedRows)
   if (upload.status !== 'EXTRACTED' || rows.length === 0) return []
 
-  return rows.map((row, index) => {
+  return rows.map((parsed, index) => {
     const key = rowKey(upload.id, index)
     const resolvedId = resolvedProductByKey[key] ?? null
-    const match = matchProduct(row.description, products)
+    // Auto-match on the ORIGINAL transcription: an edited-but-unresolved row must
+    // stay in the review queue for explicit confirm, not silently auto-count.
+    const match = matchProduct(parsed.description, products)
     const autoMatchedId = match.status === 'matched' ? match.productId : null
 
     return {
       key,
-      row,
+      // Edited row (esp. quantity) feeds aggregation + display; a resolved row's
+      // corrected qty is what actually lands in / comes back out of the count.
+      row: rowEditsByKey[key] ?? parsed,
       productId: resolvedId ?? autoMatchedId,
       status: match.status,
       suggestedProductId: match.productId,
@@ -49,9 +59,15 @@ export function computeUploadAggregates(
   upload: StockCountUpload,
   products: Product[],
   resolvedProductByKey: Record<string, string>,
+  rowEditsByKey: RowEditsByKey = {},
 ): Map<string, number> {
   const aggregates = new Map<string, number>()
-  for (const { productId, row } of matchUploadRows(upload, products, resolvedProductByKey)) {
+  for (const { productId, row } of matchUploadRows(
+    upload,
+    products,
+    resolvedProductByKey,
+    rowEditsByKey,
+  )) {
     if (!productId) continue
     aggregates.set(productId, round2((aggregates.get(productId) ?? 0) + row.qty))
   }
@@ -62,10 +78,16 @@ export function computeAllPhotoAggregates(
   uploads: StockCountUpload[],
   products: Product[],
   resolvedProductByKey: Record<string, string>,
+  rowEditsByKey: RowEditsByKey = {},
 ): Map<string, number> {
   const totals = new Map<string, number>()
   for (const upload of uploads) {
-    for (const [productId, qty] of computeUploadAggregates(upload, products, resolvedProductByKey)) {
+    for (const [productId, qty] of computeUploadAggregates(
+      upload,
+      products,
+      resolvedProductByKey,
+      rowEditsByKey,
+    )) {
       totals.set(productId, round2((totals.get(productId) ?? 0) + qty))
     }
   }
@@ -135,9 +157,13 @@ export function draftIdsThatContributedToCounts(
   uploads: StockCountUpload[],
   products: Product[],
   resolvedProductByKey: Record<string, string>,
+  rowEditsByKey: RowEditsByKey = {},
 ): string[] {
   return uploads
-    .filter((upload) => computeUploadAggregates(upload, products, resolvedProductByKey).size > 0)
+    .filter(
+      (upload) =>
+        computeUploadAggregates(upload, products, resolvedProductByKey, rowEditsByKey).size > 0,
+    )
     .map((upload) => upload.id)
 }
 
@@ -157,7 +183,8 @@ export function applyResumeDraftsToCounts(
   uploads: StockCountUpload[],
   products: Product[],
   resolvedProductByKey: Record<string, string>,
+  rowEditsByKey: RowEditsByKey = {},
 ): Map<string, number> {
   const extracted = uploads.filter((u) => u.status === 'EXTRACTED')
-  return computeAllPhotoAggregates(extracted, products, resolvedProductByKey)
+  return computeAllPhotoAggregates(extracted, products, resolvedProductByKey, rowEditsByKey)
 }

@@ -161,6 +161,37 @@ export function saveDismissedRowKeys(branchId: string, map: Record<string, true>
   }
 }
 
+const ROW_EDITS_PREFIX = 'pos_stock_count_row_edits_'
+
+// Manual corrections to what the vision model transcribed, keyed by row key
+// (uploadId:index). Kept client-side like resolutions/skips so an interrupted
+// review keeps the corrections without re-running vision.
+export function loadRowEdits(branchId: string): Record<string, ExtractedStockCountRow> {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = localStorage.getItem(ROW_EDITS_PREFIX + branchId)
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    return parsed && typeof parsed === 'object'
+      ? (parsed as Record<string, ExtractedStockCountRow>)
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+export function saveRowEdits(
+  branchId: string,
+  map: Record<string, ExtractedStockCountRow>,
+): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(ROW_EDITS_PREFIX + branchId, JSON.stringify(map))
+  } catch {
+    // localStorage unavailable/full — edits just won't survive a reload
+  }
+}
+
 /** SHA-256 hex of a file's bytes, used to detect a re-upload of the same image
  *  before it costs a Cloudinary upload + Claude vision call. */
 export async function hashFile(file: File): Promise<string> {
