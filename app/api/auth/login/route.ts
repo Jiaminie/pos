@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     }
 
     const branch = await prisma.branch.findUnique({ where: { id: branchId } })
-    if (!branch) {
+    if (!branch || branch.archived) {
       return Response.json({ data: null, error: 'Branch not found' }, { status: 404 })
     }
 

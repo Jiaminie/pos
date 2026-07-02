@@ -12,11 +12,27 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
-    const { name, address, isPrimary } = body
+    const { name, code, address, isPrimary } = body
 
     const branch = await prisma.branch.findUnique({ where: { id } })
-    if (!branch) {
+    if (!branch || branch.archived) {
       return Response.json({ data: null, error: 'Branch not found' }, { status: 404 })
+    }
+
+    if (code !== undefined) {
+      const upperCode = (code as string).trim().toUpperCase()
+      if (!upperCode) {
+        return Response.json({ data: null, error: 'Code cannot be empty' }, { status: 400 })
+      }
+      const duplicate = await prisma.branch.findFirst({
+        where: { organizationId: branch.organizationId, code: upperCode, id: { not: id } },
+      })
+      if (duplicate) {
+        return Response.json(
+          { data: null, error: `Branch code "${upperCode}" already exists in this organization` },
+          { status: 409 },
+        )
+      }
     }
 
     if (isPrimary === true && !branch.isPrimary) {
@@ -40,11 +56,46 @@ export async function PATCH(
       where: { id },
       data: {
         ...(name !== undefined     && { name: name.trim() }),
+        ...(code !== undefined     && { code: (code as string).trim().toUpperCase() }),
         ...(address !== undefined  && { address: address?.trim() || null }),
       },
     })
 
     return Response.json({ data: updated, error: null })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error'
+    return Response.json({ data: null, error: message }, { status: 500 })
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const user = await requireUserWithPermission(request, 'admin.branch.manage')
+  if (!isAuthUser(user)) return user
+
+  try {
+    const { id } = await params
+
+    const branch = await prisma.branch.findUnique({ where: { id } })
+    if (!branch || branch.archived) {
+      return Response.json({ data: null, error: 'Branch not found' }, { status: 404 })
+    }
+
+    if (branch.isPrimary) {
+      return Response.json(
+        { data: null, error: 'Cannot delete the primary branch. Set another branch as primary first.' },
+        { status: 400 },
+      )
+    }
+
+    await prisma.branch.update({
+      where: { id },
+      data: { archived: true },
+    })
+
+    return Response.json({ data: { id }, error: null })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return Response.json({ data: null, error: message }, { status: 500 })

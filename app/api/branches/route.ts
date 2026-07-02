@@ -8,7 +8,10 @@ export async function GET(request: NextRequest) {
     const organizationId = searchParams.get('organizationId') ?? undefined
 
     const branches = await prisma.branch.findMany({
-      where: organizationId ? { organizationId } : undefined,
+      where: {
+        archived: false,
+        ...(organizationId ? { organizationId } : {}),
+      },
       orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
     })
 

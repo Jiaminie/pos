@@ -9,6 +9,7 @@ export type AuditAction =
   | 'PERMISSION_CHANGE'
   | 'USER_CREATE'
   | 'USER_UPDATE'
+  | 'USER_DELETE'
   | 'LOGIN'
 
 export type AuditInput = {

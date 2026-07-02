@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Building2, Check, FileText, GitBranch, Loader2, Mail, MapPin, Monitor, Percent, Plus, Receipt, ScanBarcode, Shield, Star, Upload, Users, X } from 'lucide-react'
+import { Building2, Check, FileText, GitBranch, Loader2, Mail, MapPin, Monitor, Pencil, Percent, Plus, Receipt, ScanBarcode, Shield, Star, Trash2, Upload, Users, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { fetchSettings, saveSettings, fetchEmailSettings, saveEmailSettings, DEFAULT_SETTINGS, DEFAULT_EMAIL_SETTINGS, POS_LOOKUP_MODES, RECEIPT_FORMATS, type PDFSettings, type EmailSettings, type PosLookupMode, type ReceiptFormat } from '@/lib/settings'
 import { getMyBranchId, getMyOrgId, setMyBranchId } from '@/lib/branch'
@@ -52,6 +52,10 @@ export default function SettingsPage() {
   const [branchesLoading, setBranchesLoading] = useState(false)
   const [branchForm, setBranchForm]       = useState<BranchForm>(EMPTY_BRANCH_FORM)
   const branchCreating = useRef(false)
+  const [editingBranchId, setEditingBranchId] = useState<string | null>(null)
+  const [editForm, setEditForm]           = useState<BranchForm>(EMPTY_BRANCH_FORM)
+  const [branchSaving, setBranchSaving]   = useState(false)
+  const [branchDeletingId, setBranchDeletingId] = useState<string | null>(null)
 
   // Email tab state
   const [emailSettings, setEmailSettings] = useState<EmailSettings>(DEFAULT_EMAIL_SETTINGS)
@@ -160,6 +164,78 @@ export default function SettingsPage() {
       setBranches(prevBranches)
       toast.error('Failed to update primary branch — reverted')
     })
+  }
+
+  function startEditBranch(branch: PendingBranch) {
+    if (branch.pending) { toast.error('Still syncing — try again in a moment'); return }
+    setEditingBranchId(branch.id)
+    setEditForm({ name: branch.name, code: branch.code, address: branch.address ?? '' })
+  }
+
+  function cancelEditBranch() {
+    setEditingBranchId(null)
+    setEditForm(EMPTY_BRANCH_FORM)
+  }
+
+  async function handleUpdateBranch() {
+    if (!editingBranchId || branchSaving) return
+    if (!editForm.name.trim() || !editForm.code.trim()) {
+      toast.error('Name and code are required')
+      return
+    }
+    const prevBranches = branches
+    const snapshot = editForm
+    setBranchSaving(true)
+    setBranches((prev) => prev.map((b) =>
+      b.id === editingBranchId
+        ? { ...b, name: snapshot.name.trim(), code: snapshot.code.trim().toUpperCase(), address: snapshot.address.trim() || undefined }
+        : b,
+    ))
+
+    try {
+      const res = await fetch(`/api/branches/${editingBranchId}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          name:    snapshot.name.trim(),
+          code:    snapshot.code.trim(),
+          address: snapshot.address.trim(),
+        }),
+      })
+      const { data, error } = await res.json()
+      if (!res.ok) throw new Error(error ?? 'Failed to update branch')
+      setBranches((prev) => prev.map((b) => b.id === editingBranchId ? data : b))
+      cancelEditBranch()
+      toast.success(`Branch "${data.name}" updated`)
+    } catch (err) {
+      setBranches(prevBranches)
+      toast.error(err instanceof Error ? err.message : 'Failed to update branch')
+    } finally {
+      setBranchSaving(false)
+    }
+  }
+
+  async function handleDeleteBranch(branch: PendingBranch) {
+    if (branch.pending) { toast.error('Still syncing — try again in a moment'); return }
+    if (branch.isPrimary) { toast.error('Cannot delete the primary branch'); return }
+    if (!window.confirm(`Delete branch "${branch.name}"? This cannot be undone.`)) return
+
+    const prevBranches = branches
+    setBranchDeletingId(branch.id)
+    setBranches((prev) => prev.filter((b) => b.id !== branch.id))
+    if (editingBranchId === branch.id) cancelEditBranch()
+
+    try {
+      const res = await fetch(`/api/branches/${branch.id}`, { method: 'DELETE' })
+      const { error } = await res.json()
+      if (!res.ok) throw new Error(error ?? 'Failed to delete branch')
+      toast.success(`Branch "${branch.name}" deleted`)
+    } catch (err) {
+      setBranches(prevBranches)
+      toast.error(err instanceof Error ? err.message : 'Failed to delete branch')
+    } finally {
+      setBranchDeletingId(null)
+    }
   }
 
   function handleDeviceBranchChange(newBranchId: string) {
@@ -796,38 +872,126 @@ export default function SettingsPage() {
                   ) : (
                     <div className="space-y-2">
                       {branches.map((branch) => (
-                        <div key={branch.id} className="flex items-start justify-between gap-3 border border-gray-100 rounded-xl px-4 py-3 bg-gray-50">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="text-sm font-medium text-gray-900">{branch.name}</span>
-                              <span className="text-[10px] font-mono bg-white border border-gray-200 text-gray-600 px-1.5 py-0.5 rounded">
-                                {branch.code}
-                              </span>
-                              {branch.isPrimary && (
-                                <span className="flex items-center gap-0.5 text-[10px] text-amber-600 font-medium">
-                                  <Star size={10} className="fill-amber-400 text-amber-400" />
-                                  Primary
-                                </span>
-                              )}
-                              {branch.pending && (
-                                <span className="text-[10px] text-gray-400 font-medium">Syncing…</span>
-                              )}
+                        <div key={branch.id} className="border border-gray-100 rounded-xl px-4 py-3 bg-gray-50">
+                          {editingBranchId === branch.id ? (
+                            <div className="space-y-3">
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                  <label className="block text-xs font-medium text-gray-700">Name</label>
+                                  <input
+                                    type="text"
+                                    value={editForm.name}
+                                    onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="block text-xs font-medium text-gray-700">Code</label>
+                                  <input
+                                    type="text"
+                                    value={editForm.code}
+                                    onChange={(e) => setEditForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))}
+                                    maxLength={8}
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  />
+                                </div>
+                              </div>
+                              <div className="space-y-1">
+                                <label className="block text-xs font-medium text-gray-700">
+                                  Address <span className="text-gray-400 font-normal">(optional)</span>
+                                </label>
+                                <input
+                                  type="text"
+                                  value={editForm.address}
+                                  onChange={(e) => setEditForm((f) => ({ ...f, address: e.target.value }))}
+                                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={handleUpdateBranch}
+                                  disabled={branchSaving}
+                                  className="flex items-center gap-1.5 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors disabled:opacity-60"
+                                >
+                                  {branchSaving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={cancelEditBranch}
+                                  disabled={branchSaving}
+                                  className="flex items-center gap-1.5 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-gray-100 transition-colors disabled:opacity-60"
+                                >
+                                  <X size={13} />
+                                  Cancel
+                                </button>
+                              </div>
                             </div>
-                            {branch.address && (
-                              <p className="flex items-center gap-1 text-xs text-gray-500 mt-0.5">
-                                <MapPin size={10} />
-                                {branch.address}
-                              </p>
-                            )}
-                          </div>
-                          {!branch.isPrimary && !branch.pending && (
-                            <button
-                              type="button"
-                              onClick={() => handleSetPrimary(branch)}
-                              className="shrink-0 text-xs text-blue-600 hover:underline"
-                            >
-                              Set primary
-                            </button>
+                          ) : (
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-sm font-medium text-gray-900">{branch.name}</span>
+                                  <span className="text-[10px] font-mono bg-white border border-gray-200 text-gray-600 px-1.5 py-0.5 rounded">
+                                    {branch.code}
+                                  </span>
+                                  {branch.isPrimary && (
+                                    <span className="flex items-center gap-0.5 text-[10px] text-amber-600 font-medium">
+                                      <Star size={10} className="fill-amber-400 text-amber-400" />
+                                      Primary
+                                    </span>
+                                  )}
+                                  {branch.pending && (
+                                    <span className="text-[10px] text-gray-400 font-medium">Syncing…</span>
+                                  )}
+                                </div>
+                                {branch.address && (
+                                  <p className="flex items-center gap-1 text-xs text-gray-500 mt-0.5">
+                                    <MapPin size={10} />
+                                    {branch.address}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0">
+                                {!branch.isPrimary && !branch.pending && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetPrimary(branch)}
+                                    className="text-xs text-blue-600 hover:underline px-1"
+                                  >
+                                    Set primary
+                                  </button>
+                                )}
+                                {!branch.pending && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => startEditBranch(branch)}
+                                      title="Edit branch"
+                                      aria-label="Edit branch"
+                                      className="p-1.5 rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                                    >
+                                      <Pencil size={14} />
+                                    </button>
+                                    {!branch.isPrimary && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteBranch(branch)}
+                                        disabled={branchDeletingId === branch.id}
+                                        title="Delete branch"
+                                        aria-label="Delete branch"
+                                        className="p-1.5 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
+                                      >
+                                        {branchDeletingId === branch.id
+                                          ? <Loader2 size={14} className="animate-spin" />
+                                          : <Trash2 size={14} />}
+                                      </button>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            </div>
                           )}
                         </div>
                       ))}

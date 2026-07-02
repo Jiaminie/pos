@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/server/db'
 import { requireUser, isAuthUser, canManageUsers } from '@/lib/server/auth/guard'
 import { hashPin, validatePinFormat } from '@/lib/server/auth/pin'
+import { logAudit } from '@/lib/server/audit'
 
 export async function PATCH(
   request: NextRequest,
@@ -71,6 +72,66 @@ export async function PATCH(
 
     const { pinHash: _, ...safe } = updated
     return Response.json({ data: safe, error: null })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error'
+    return Response.json({ data: null, error: message }, { status: 500 })
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const user = await requireUser(request)
+  if (!isAuthUser(user)) return user
+
+  if (!(await canManageUsers(user))) {
+    return Response.json({ data: null, error: 'Forbidden' }, { status: 403 })
+  }
+
+  const { id } = await params
+  if (id === user.userId) {
+    return Response.json({ data: null, error: 'Cannot delete your own account' }, { status: 400 })
+  }
+
+  const target = await prisma.user.findUnique({ where: { id } })
+  if (!target || target.organizationId !== user.orgId) {
+    return Response.json({ data: null, error: 'User not found' }, { status: 404 })
+  }
+
+  if (target.role === 'OWNER') {
+    return Response.json({ data: null, error: 'Cannot delete the owner account' }, { status: 400 })
+  }
+
+  if (user.role === 'MANAGER') {
+    if (target.role !== 'CASHIER' || target.branchId !== user.branchId) {
+      return Response.json({ data: null, error: 'Forbidden' }, { status: 403 })
+    }
+  }
+
+  const salesCount = await prisma.sale.count({ where: { cashierId: id } })
+  if (salesCount > 0) {
+    return Response.json(
+      { data: null, error: 'User has sales history — deactivate instead' },
+      { status: 400 },
+    )
+  }
+
+  try {
+    await prisma.user.delete({ where: { id } })
+
+    await logAudit({
+      organizationId: user.orgId,
+      actorId: user.userId,
+      actorName: user.name,
+      action: 'USER_DELETE',
+      branchId: target.branchId ?? undefined,
+      targetType: 'User',
+      targetId: id,
+      metadata: { name: target.name, role: target.role },
+    })
+
+    return Response.json({ data: { id }, error: null })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return Response.json({ data: null, error: message }, { status: 500 })
