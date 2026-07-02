@@ -36,6 +36,26 @@ CREATE TABLE "devices" (
     CONSTRAINT "devices_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+-- Backfill: store_settings was originally created via `prisma db push` before
+-- migrations were adopted, so no migration ever recorded its creation — later
+-- migrations only ALTER it. That left the history un-replayable on a fresh /
+-- shadow database (the first ALTER hit a non-existent table). This CREATE
+-- restores the original (init-era) columns; the later migrations layer the
+-- rest on. IF NOT EXISTS makes it a no-op on any DB that already has the table.
+CREATE TABLE IF NOT EXISTS "store_settings" (
+    "id" TEXT NOT NULL DEFAULT 'singleton',
+    "company_name" TEXT NOT NULL DEFAULT 'My Business',
+    "tagline" TEXT NOT NULL DEFAULT '',
+    "logo_data_url" TEXT NOT NULL DEFAULT '',
+    "primary_color" TEXT NOT NULL DEFAULT '#2563eb',
+    "currency" TEXT NOT NULL DEFAULT 'KES',
+    "footer_text" TEXT NOT NULL DEFAULT 'Thank you for your business.',
+    "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "store_settings_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "products_sku_key" ON "products"("sku");
 

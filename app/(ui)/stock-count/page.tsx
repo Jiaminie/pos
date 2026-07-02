@@ -1,15 +1,18 @@
 'use client'
 
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Camera,
+  Check,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
   ImagePlus,
   Loader2,
+  Link2,
   Search,
+  SkipForward,
   Trash2,
   X,
 } from 'lucide-react'
@@ -40,16 +43,21 @@ import {
   getRowDelta as computeRowDelta,
   round2,
 } from '@/lib/stock-count/manual'
-import type { ReviewFilter, StockCountUpload } from '@/lib/stock-count/types'
+import type { ReviewFilter, StockCountUpload, UnmatchedReviewRow } from '@/lib/stock-count/types'
 import {
   completeStockCountUploads,
   extractStockCountPhotos,
   fetchResumableDrafts,
   fetchUploadSignature,
   formatStaleAge,
+  hashFile,
+  loadDismissedRowKeys,
   loadResolvedProductMap,
+  loadUploadedHashes,
   parseExtractedRows,
+  saveDismissedRowKeys,
   saveResolvedProductMap,
+  saveUploadedHashes,
   STALE_DRAFT_MS,
   uploadToCloudinary,
   validatePhotoFiles,
@@ -109,8 +117,11 @@ export default function StockCountPage() {
   const [posLookupMode, setPosLookupMode] = useState<PosLookupMode>('catalog')
   const [drafts, setDrafts] = useState<StockCountUpload[]>([])
   const [resolvedByKey, setResolvedByKey] = useState<Record<string, string>>({})
+  const [dismissedKeys, setDismissedKeys] = useState<Record<string, true>>({})
+  const [uploadedHashes, setUploadedHashes] = useState<Record<string, string>>({})
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all')
   const [pickerSearch, setPickerSearch] = useState<Record<string, string>>({})
+  const [openPickerKey, setOpenPickerKey] = useState<string | null>(null)
 
   const photoAppliedRef = useRef<Set<string>>(new Set())
   const submittingRef = useRef(false)
@@ -162,6 +173,19 @@ export default function StockCountPage() {
         if (Object.keys(resolvedFromStorage).length > 0) {
           setResolvedByKey((prev) => ({ ...resolvedFromStorage, ...prev }))
         }
+        const dismissedFromStorage = loadDismissedRowKeys(branchId)
+        if (Object.keys(dismissedFromStorage).length > 0) {
+          setDismissedKeys((prev) => ({ ...dismissedFromStorage, ...prev }))
+        }
+        // Keep only dedup hashes whose upload is still in the active count —
+        // submitted/discarded/expired drafts drop out, so re-uploading their
+        // image later is allowed and the map stays bounded.
+        const resumeIds = new Set(resume.map((d) => d.id))
+        const prunedHashes: Record<string, string> = {}
+        for (const [hash, id] of Object.entries(loadUploadedHashes(branchId))) {
+          if (resumeIds.has(id)) prunedHashes[hash] = id
+        }
+        setUploadedHashes(prunedHashes)
         const resumeAggregates = applyResumeDraftsToCounts(resume, prods, resolvedFromStorage)
         if (resumeAggregates.size > 0) {
           setCountedQtys((prev) => mergePhotoAggregatesIntoCounts(prev, resumeAggregates))
@@ -210,6 +234,16 @@ export default function StockCountPage() {
     saveResolvedProductMap(myBranchId, resolvedByKey)
   }, [resolvedByKey, myBranchId])
 
+  useEffect(() => {
+    if (!myBranchId || !hydratedResolvedRef.current) return
+    saveDismissedRowKeys(myBranchId, dismissedKeys)
+  }, [dismissedKeys, myBranchId])
+
+  useEffect(() => {
+    if (!myBranchId || !hydratedResolvedRef.current) return
+    saveUploadedHashes(myBranchId, uploadedHashes)
+  }, [uploadedHashes, myBranchId])
+
   const categoryMap = useMemo(
     () => Object.fromEntries(categories.map((c) => [c.id, c.name])),
     [categories],
@@ -242,8 +276,11 @@ export default function StockCountPage() {
   )
 
   const unmatchedRows = useMemo(
-    () => buildUnmatchedReviewRows(drafts, products, resolvedByKey),
-    [drafts, products, resolvedByKey],
+    () =>
+      buildUnmatchedReviewRows(drafts, products, resolvedByKey).filter(
+        (row) => !dismissedKeys[row.key],
+      ),
+    [drafts, products, resolvedByKey, dismissedKeys],
   )
 
   const filteredReviewRows = useMemo(() => {
@@ -305,11 +342,36 @@ export default function StockCountPage() {
 
     setUploading(true)
     try {
+      // Drop images already in this count (or repeated within this selection)
+      // before spending an upload + Claude call on them.
+      const hashes = await Promise.all(files.map((file) => hashFile(file)))
+      const batchSeen = new Set<string>()
+      const toUpload: File[] = []
+      const toUploadHashes: string[] = []
+      let skipped = 0
+      files.forEach((file, i) => {
+        const hash = hashes[i]!
+        if (uploadedHashes[hash] || batchSeen.has(hash)) {
+          skipped++
+          return
+        }
+        batchSeen.add(hash)
+        toUpload.push(file)
+        toUploadHashes.push(hash)
+      })
+
+      if (skipped > 0) {
+        toast.warning(
+          `${skipped} duplicate photo${skipped === 1 ? '' : 's'} skipped (already added to this count)`,
+        )
+      }
+      if (toUpload.length === 0) return
+
       const signature = await fetchUploadSignature()
-      const urls = await Promise.all(files.map((file) => uploadToCloudinary(file, signature)))
+      const urls = await Promise.all(toUpload.map((file) => uploadToCloudinary(file, signature)))
       const uploads = await extractStockCountPhotos(
         branchId,
-        urls.map((url, index) => ({ url, filename: files[index]?.name })),
+        urls.map((url, index) => ({ url, filename: toUpload[index]?.name })),
       )
 
       setDrafts((prev) => [...uploads, ...prev.filter((d) => !uploads.some((u) => u.id === d.id))])
@@ -317,6 +379,17 @@ export default function StockCountPage() {
       for (const upload of uploads) {
         applyUploadAggregatesToCounts(upload, resolvedByKey)
       }
+
+      // Record hash → upload id (extract preserves input order) so a later
+      // re-selection of the same file is recognised.
+      setUploadedHashes((prev) => {
+        const next = { ...prev }
+        uploads.forEach((u, i) => {
+          const hash = toUploadHashes[i]
+          if (hash) next[hash] = u.id
+        })
+        return next
+      })
 
       const errors = uploads.filter((u) => u.status === 'ERROR')
       const ok = uploads.filter((u) => u.status === 'EXTRACTED')
@@ -348,6 +421,14 @@ export default function StockCountPage() {
       const aggregates = computeUploadAggregates(upload, products, resolvedByKey)
       setCountedQtys((prev) => subtractAggregates(prev, aggregates))
       setResolvedByKey((prev) => clearResolvedKeysForUpload(prev, uploadId))
+      // Free the dedup hash so re-uploading this image is allowed after discard.
+      setUploadedHashes((prev) => {
+        const next = { ...prev }
+        for (const hash of Object.keys(next)) {
+          if (next[hash] === uploadId) delete next[hash]
+        }
+        return next
+      })
       photoAppliedRef.current.delete(uploadId)
       setDrafts((prev) => prev.filter((d) => d.id !== uploadId))
       toast.success('Photo draft discarded')
@@ -361,6 +442,33 @@ export default function StockCountPage() {
     setCountedQtys((prev) =>
       mergePhotoAggregatesIntoCounts(prev, new Map([[productId, round2(qty)]])),
     )
+    setPickerSearch((prev) => {
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
+    setOpenPickerKey((cur) => (cur === key ? null : cur))
+  }
+
+  function handleSkipRow(key: string) {
+    setDismissedKeys((prev) => ({ ...prev, [key]: true }))
+    setOpenPickerKey((cur) => (cur === key ? null : cur))
+    toast('Row skipped — it won’t be counted', {
+      action: {
+        label: 'Undo',
+        onClick: () =>
+          setDismissedKeys((prev) => {
+            const next = { ...prev }
+            delete next[key]
+            return next
+          }),
+      },
+    })
+  }
+
+  function handleAcceptSuggestion(item: UnmatchedReviewRow) {
+    if (!item.suggestedProductId) return
+    handleResolveRow(item.key, item.suggestedProductId, item.row.qty)
   }
 
   async function handleSubmit() {
@@ -449,6 +557,175 @@ export default function StockCountPage() {
         }),
       )
       .slice(0, 20)
+  }
+
+  // Inline product search used both in the desktop expanded row and mobile card
+  // to link a review row to a different product than the suggested one.
+  function renderProductPicker(item: UnmatchedReviewRow) {
+    const query = pickerSearch[item.key] ?? item.row.description
+    const options = productPickerOptions(query)
+    return (
+      <div>
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            autoFocus
+            value={query}
+            onChange={(e) => setPickerSearch((prev) => ({ ...prev, [item.key]: e.target.value }))}
+            placeholder="Search products to link this row…"
+            className="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+        {query.trim() && options.length > 0 && (
+          <ul className="mt-1 border border-gray-200 rounded-lg bg-white shadow-sm max-h-48 overflow-y-auto">
+            {options.map((product) => (
+              <li key={product.id}>
+                <button
+                  type="button"
+                  onClick={() => handleResolveRow(item.key, product.id, item.row.qty)}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 truncate"
+                >
+                  {product.name}
+                  {product.specification ? (
+                    <span className="text-gray-500"> · {product.specification}</span>
+                  ) : null}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    )
+  }
+
+  function renderReviewRow(item: UnmatchedReviewRow) {
+    const pickerOpen = openPickerKey === item.key
+    return (
+      <Fragment key={item.key}>
+        <tr className="hover:bg-gray-50 align-top">
+          <td className="px-4 py-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={item.imageUrl}
+              alt=""
+              className="w-9 h-9 rounded object-cover ring-1 ring-gray-200"
+            />
+          </td>
+          <td className="px-4 py-3">
+            <span
+              className={`inline-block text-[10px] font-medium uppercase tracking-wide px-2 py-0.5 rounded-full mb-1 ${reviewStatusBadgeClass(item.status)}`}
+            >
+              {reviewStatusLabel(item.status)}
+            </span>
+            <p className="font-medium text-gray-900">{item.row.description}</p>
+          </td>
+          <td className="px-4 py-3 text-right tabular-nums text-gray-700">{item.row.qty}</td>
+          <td className="px-4 py-3 text-gray-600">
+            {item.suggestedProductName ?? <span className="text-gray-400">No suggestion</span>}
+          </td>
+          <td className="px-4 py-3">
+            <div className="flex items-center justify-end gap-1.5">
+              {item.suggestedProductId && (
+                <button
+                  type="button"
+                  onClick={() => handleAcceptSuggestion(item)}
+                  className="inline-flex items-center gap-1 rounded-lg bg-green-600 text-white px-2.5 py-1.5 text-xs font-medium hover:bg-green-700 transition-colors"
+                  title={`Accept: ${item.suggestedProductName}`}
+                >
+                  <Check size={14} /> Accept
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setOpenPickerKey(pickerOpen ? null : item.key)}
+                className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  pickerOpen
+                    ? 'border-blue-300 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <Link2 size={14} /> Link
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSkipRow(item.key)}
+                className="inline-flex items-center gap-1 rounded-lg border border-gray-300 text-gray-500 px-2.5 py-1.5 text-xs font-medium hover:bg-gray-50 hover:text-red-600 transition-colors"
+                title="Skip — don't count this row"
+              >
+                <SkipForward size={14} /> Skip
+              </button>
+            </div>
+          </td>
+        </tr>
+        {pickerOpen && (
+          <tr className="bg-gray-50/60">
+            <td />
+            <td colSpan={4} className="px-4 pb-3">
+              <div className="max-w-md">{renderProductPicker(item)}</div>
+            </td>
+          </tr>
+        )}
+      </Fragment>
+    )
+  }
+
+  function renderReviewCard(item: UnmatchedReviewRow) {
+    const pickerOpen = openPickerKey === item.key
+    return (
+      <div key={item.key} className="p-4 flex gap-3">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={item.imageUrl}
+          alt=""
+          className="w-11 h-11 rounded object-cover ring-1 ring-gray-200 shrink-0"
+        />
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <span
+              className={`text-[10px] font-medium uppercase tracking-wide px-2 py-0.5 rounded-full ${reviewStatusBadgeClass(item.status)}`}
+            >
+              {reviewStatusLabel(item.status)}
+            </span>
+            <span className="text-sm font-medium text-gray-900 truncate">{item.row.description}</span>
+            <span className="text-sm tabular-nums text-gray-600">× {item.row.qty}</span>
+          </div>
+          {item.suggestedProductName && (
+            <p className="text-xs text-gray-500 mb-2">Suggested: {item.suggestedProductName}</p>
+          )}
+          <div className="flex flex-wrap gap-1.5">
+            {item.suggestedProductId && (
+              <button
+                type="button"
+                onClick={() => handleAcceptSuggestion(item)}
+                className="inline-flex items-center gap-1 rounded-lg bg-green-600 text-white px-2.5 py-1.5 text-xs font-medium hover:bg-green-700"
+              >
+                <Check size={14} /> Accept
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setOpenPickerKey(pickerOpen ? null : item.key)}
+              className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium ${
+                pickerOpen
+                  ? 'border-blue-300 bg-blue-50 text-blue-700'
+                  : 'border-gray-300 text-gray-700'
+              }`}
+            >
+              <Link2 size={14} /> Link
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSkipRow(item.key)}
+              className="inline-flex items-center gap-1 rounded-lg border border-gray-300 text-gray-500 px-2.5 py-1.5 text-xs font-medium hover:text-red-600"
+            >
+              <SkipForward size={14} /> Skip
+            </button>
+          </div>
+          {pickerOpen && <div className="mt-2">{renderProductPicker(item)}</div>}
+        </div>
+      </div>
+    )
   }
 
   if (!authChecked || loading) {
@@ -644,84 +921,34 @@ export default function StockCountPage() {
                 ))}
               </div>
             </div>
-            <div className="divide-y divide-gray-100">
-              {filteredReviewRows.length === 0 ? (
-                <p className="px-4 py-6 text-sm text-gray-500 text-center">No rows in this filter</p>
-              ) : (
-                filteredReviewRows.map((item) => {
-                  const query = pickerSearch[item.key] ?? item.row.description
-                  const options = productPickerOptions(query)
-                  return (
-                    <div key={item.key} className="p-4 flex flex-col md:flex-row md:items-start gap-3">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={item.imageUrl}
-                        alt=""
-                        className="w-12 h-12 rounded object-cover ring-1 ring-gray-200 shrink-0 hidden md:block"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-2 mb-1">
-                          <span
-                            className={`text-[10px] font-medium uppercase tracking-wide px-2 py-0.5 rounded-full ${reviewStatusBadgeClass(item.status)}`}
-                          >
-                            {reviewStatusLabel(item.status)}
-                          </span>
-                          <span className="text-sm font-medium text-gray-900 truncate">
-                            {item.row.description}
-                          </span>
-                          <span className="text-sm tabular-nums text-gray-600">× {item.row.qty}</span>
-                        </div>
-                        {item.suggestedProductName && (
-                          <p className="text-xs text-gray-500 mb-2">
-                            Suggested: {item.suggestedProductName}
-                          </p>
-                        )}
-                        <div className="relative max-w-md">
-                          <Search
-                            size={14}
-                            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                          />
-                          <input
-                            type="text"
-                            value={query}
-                            onChange={(e) =>
-                              setPickerSearch((prev) => ({ ...prev, [item.key]: e.target.value }))
-                            }
-                            placeholder="Search products to link this row…"
-                            className="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                        </div>
-                        {query.trim() && options.length > 0 && (
-                          <ul className="mt-1 max-w-md border border-gray-200 rounded-lg bg-white shadow-sm max-h-40 overflow-y-auto">
-                            {options.map((product) => (
-                              <li key={product.id}>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    handleResolveRow(item.key, product.id, item.row.qty)
-                                    setPickerSearch((prev) => {
-                                      const next = { ...prev }
-                                      delete next[item.key]
-                                      return next
-                                    })
-                                  }}
-                                  className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 truncate"
-                                >
-                                  {product.name}
-                                  {product.specification ? (
-                                    <span className="text-gray-500"> · {product.specification}</span>
-                                  ) : null}
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })
-              )}
-            </div>
+            {filteredReviewRows.length === 0 ? (
+              <p className="px-4 py-6 text-sm text-gray-500 text-center">No rows in this filter</p>
+            ) : (
+              <>
+                {/* Desktop: table */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+                      <tr>
+                        <th className="text-left px-4 py-2.5 w-10"></th>
+                        <th className="text-left px-4 py-2.5">Extracted row</th>
+                        <th className="text-right px-4 py-2.5 w-16">Qty</th>
+                        <th className="text-left px-4 py-2.5">Suggested match</th>
+                        <th className="text-right px-4 py-2.5 w-56">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {filteredReviewRows.map((item) => renderReviewRow(item))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile: cards */}
+                <div className="md:hidden divide-y divide-gray-100">
+                  {filteredReviewRows.map((item) => renderReviewCard(item))}
+                </div>
+              </>
+            )}
           </div>
         )}
 

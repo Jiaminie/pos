@@ -135,6 +135,68 @@ export function saveResolvedProductMap(branchId: string, map: Record<string, str
   }
 }
 
+const DISMISSED_KEY_PREFIX = 'pos_stock_count_dismissed_'
+
+// Rows the user explicitly skipped during review (a misread/junk row they don't
+// want counted). Persisted for the same reason as resolutions: a reload
+// shouldn't resurface rows they've already dealt with.
+export function loadDismissedRowKeys(branchId: string): Record<string, true> {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = localStorage.getItem(DISMISSED_KEY_PREFIX + branchId)
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, true>) : {}
+  } catch {
+    return {}
+  }
+}
+
+export function saveDismissedRowKeys(branchId: string, map: Record<string, true>): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(DISMISSED_KEY_PREFIX + branchId, JSON.stringify(map))
+  } catch {
+    // localStorage unavailable/full — skipped rows just won't survive a reload
+  }
+}
+
+/** SHA-256 hex of a file's bytes, used to detect a re-upload of the same image
+ *  before it costs a Cloudinary upload + Claude vision call. */
+export async function hashFile(file: File): Promise<string> {
+  const buf = await file.arrayBuffer()
+  const digest = await crypto.subtle.digest('SHA-256', buf)
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+const UPLOADED_HASH_PREFIX = 'pos_stock_count_hashes_'
+
+// Maps a file content hash → the upload id it produced, so a duplicate image can
+// be recognised across reloads. Pruned to the currently-present drafts on resume,
+// so it stays bounded and only guards images still in the active count.
+export function loadUploadedHashes(branchId: string): Record<string, string> {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = localStorage.getItem(UPLOADED_HASH_PREFIX + branchId)
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, string>) : {}
+  } catch {
+    return {}
+  }
+}
+
+export function saveUploadedHashes(branchId: string, map: Record<string, string>): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(UPLOADED_HASH_PREFIX + branchId, JSON.stringify(map))
+  } catch {
+    // localStorage unavailable/full — dedup just won't survive a reload
+  }
+}
+
 export function formatStaleAge(createdAt: string): string {
   const ms = Date.now() - new Date(createdAt).getTime()
   const hours = Math.floor(ms / (60 * 60 * 1000))
