@@ -151,7 +151,19 @@ function verifyStaticWiring() {
   assert('discard draft action', page.includes('handleDiscardDraft') && page.includes("'DISCARDED'"))
   assert('submit only contributing drafts', page.includes('draftIdsThatContributedToCounts'))
   assert('submit uses Phase 4 path', page.includes('buildAdjustmentTransactions') && page.includes('createManyTx'))
-  assert('match uses normalizeQuery', readFileSync(join(root, 'lib/stock-count/match.ts'), 'utf8').includes('normalizeQuery'))
+  // Word-level overlap (not the old whole-string substring): a description that
+  // shares two real words matches the right product, not one that merely shares
+  // a generic filler word.
+  const catalog = [
+    product('p-flex', 'Flexible Connector 1/2'),
+    product('p-chrome', 'Chrome Bracket'),
+  ]
+  const overlapMatch = matchProduct('Magic Flexible Connector', catalog)
+  assert('multi-word overlap matches the right product', overlapMatch.productId === 'p-flex')
+  assert(
+    'generic/stopword-only query does not spuriously match',
+    matchProduct('Assorted General', catalog).status === 'unmatched',
+  )
 }
 
 function main() {

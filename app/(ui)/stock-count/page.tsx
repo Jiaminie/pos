@@ -157,6 +157,7 @@ export default function StockCountPage() {
   const [resolvedByKey, setResolvedByKey] = useState<Record<string, string>>({})
   const [dismissedKeys, setDismissedKeys] = useState<Record<string, true>>({})
   const [uploadedHashes, setUploadedHashes] = useState<Record<string, string>>({})
+  const [activeTab, setActiveTab] = useState<'count' | 'photos'>('count')
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all')
   const [reviewImageFilter, setReviewImageFilter] = useState<string>('all')
   const [pickerSearch, setPickerSearch] = useState<Record<string, string>>({})
@@ -1280,23 +1281,60 @@ export default function StockCountPage() {
           </button>
         </div>
 
-        {staleDrafts.length > 0 && (
-          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-start gap-2">
-            <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-            <div>
-              {staleDrafts.length} photo draft{staleDrafts.length === 1 ? '' : 's'} extracted{' '}
-              {formatStaleAge(staleDrafts[0]!.createdAt)} — recent sales or restocks may make
-              variances stale. Review carefully before submitting.
-            </div>
-          </div>
-        )}
-
         {pendingAdjustments.length > 0 && (
           <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
             {pendingAdjustments.length} product{pendingAdjustments.length === 1 ? '' : 's'} with
             non-zero variance ready to submit.
           </div>
         )}
+
+        <div className="flex gap-1 mb-5 border-b border-gray-200">
+          <button
+            type="button"
+            onClick={() => setActiveTab('count')}
+            className={`-mb-px px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'count'
+                ? 'border-blue-600 text-blue-700'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Count sheet
+            {pendingAdjustments.length > 0 && (
+              <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-blue-100 text-blue-700 text-[11px] font-semibold px-1.5 min-w-5">
+                {pendingAdjustments.length}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('photos')}
+            className={`-mb-px px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'photos'
+                ? 'border-blue-600 text-blue-700'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Photo review
+            {unmatchedRows.length > 0 && (
+              <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-amber-100 text-amber-800 text-[11px] font-semibold px-1.5 min-w-5">
+                {unmatchedRows.length}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {activeTab === 'photos' && (
+          <>
+            {staleDrafts.length > 0 && (
+              <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-start gap-2">
+                <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                <div>
+                  {staleDrafts.length} photo draft{staleDrafts.length === 1 ? '' : 's'} extracted{' '}
+                  {formatStaleAge(staleDrafts[0]!.createdAt)} — recent sales or restocks may make
+                  variances stale. Review carefully before submitting.
+                </div>
+              </div>
+            )}
 
         <div className="mb-5 rounded-xl border border-gray-200 bg-gray-50 p-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -1489,7 +1527,11 @@ export default function StockCountPage() {
             )}
           </div>
         )}
+          </>
+        )}
 
+        {activeTab === 'count' && (
+          <>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch mb-3">
           <div className="relative flex-1 min-w-0 w-full">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
@@ -1720,6 +1762,8 @@ export default function StockCountPage() {
                 </button>
               </div>
             )}
+          </>
+        )}
           </>
         )}
       </div>
