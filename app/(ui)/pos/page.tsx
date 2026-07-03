@@ -45,6 +45,69 @@ import type { Product, ProductCategory, InventoryTransaction, IncidentReason, Sa
 
 type CartItem = Product & { qty: number; unitPrice: number }
 
+type CartTotals = {
+  listTotal: number
+  negotiatedSubtotal: number
+  lineDiscountTotal: number
+  lineMarkupTotal: number
+  cartDiscountApplied: number
+  grandTotal: number
+}
+
+function computeCartTotals(
+  lines: CartItem[],
+  cartDiscountApplied: number,
+  unitPriceFor: (item: CartItem) => number,
+): CartTotals {
+  const listTotal = lines.reduce((sum, item) => sum + item.sellingPrice * item.qty, 0)
+  const negotiatedSubtotal = lines.reduce((sum, item) => sum + unitPriceFor(item) * item.qty, 0)
+  const lineAdjustment = listTotal - negotiatedSubtotal
+  return {
+    listTotal,
+    negotiatedSubtotal,
+    lineDiscountTotal: Math.max(0, lineAdjustment),
+    lineMarkupTotal: Math.max(0, -lineAdjustment),
+    cartDiscountApplied,
+    grandTotal: negotiatedSubtotal - cartDiscountApplied,
+  }
+}
+
+function CartTotalsBreakdown({ totals }: { totals: CartTotals }) {
+  const hasLineAdjustment = totals.lineDiscountTotal > 0 || totals.lineMarkupTotal > 0
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-xs text-gray-500">
+        <span>List total</span>
+        <span className={hasLineAdjustment ? 'line-through' : ''}>KES {totals.listTotal.toLocaleString()}</span>
+      </div>
+      {totals.lineDiscountTotal > 0 && (
+        <div className="flex justify-between text-xs text-amber-600">
+          <span>Line discounts</span>
+          <span>−KES {totals.lineDiscountTotal.toLocaleString()}</span>
+        </div>
+      )}
+      {totals.lineMarkupTotal > 0 && (
+        <div className="flex justify-between text-xs text-blue-600">
+          <span>Line markups</span>
+          <span>+KES {totals.lineMarkupTotal.toLocaleString()}</span>
+        </div>
+      )}
+      {hasLineAdjustment && (
+        <div className="flex justify-between text-xs text-gray-700">
+          <span>Adjusted subtotal</span>
+          <span>KES {totals.negotiatedSubtotal.toLocaleString()}</span>
+        </div>
+      )}
+      {totals.cartDiscountApplied > 0 && (
+        <div className="flex justify-between text-xs text-amber-600">
+          <span>Cart discount</span>
+          <span>−KES {totals.cartDiscountApplied.toLocaleString()}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface QuoteForm {
   customerName: string
   customerPhone: string
@@ -70,7 +133,7 @@ export default function POSPage() {
   const POS_PAGE_SIZE = 48
   const [cart, setCart] = useState<CartItem[]>([])
   const [offline, setOffline] = useState(false)
-  const [receipt, setReceipt] = useState<{ orderId: string; items: CartItem[]; total: number } | null>(null)
+  const [receipt, setReceipt] = useState<{ orderId: string; items: CartItem[]; totals: CartTotals } | null>(null)
   const [checking, setChecking] = useState(false)
   const [quoteOpen, setQuoteOpen] = useState(false)
   const [quoteForm, setQuoteForm] = useState<QuoteForm>({ customerName: '', customerPhone: '', note: '' })
@@ -458,11 +521,12 @@ export default function POSPage() {
     setCartDiscountInput(String(Math.round(applied)))
   }
 
-  const subtotal = cart.reduce((sum, i) => sum + resolvedItemUnitPrice(i) * i.qty, 0)
-  const listTotal = cart.reduce((sum, i) => sum + i.sellingPrice * i.qty, 0)
-  const lineAdjustment = listTotal - subtotal
-  const totalDiscount = Math.max(0, lineAdjustment)
-  const totalMarkup = Math.max(0, -lineAdjustment)
+  const cartTotals = useMemo(
+    () => computeCartTotals(cart, cartDiscountApplied, resolvedItemUnitPrice),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- priceDrafts drives resolvedItemUnitPrice
+    [cart, cartDiscountApplied, priceDrafts, minMarkupPercent],
+  )
+
   const maxCartDisc = cart.length > 0
     ? maxCartDiscount(cart.map((item) => ({
         sellingPrice: item.sellingPrice,
@@ -493,6 +557,8 @@ export default function POSPage() {
     const now = new Date().toISOString()
     const deviceId = getDeviceId()
 
+    const checkoutTotals = computeCartTotals(cart, cartDiscountApplied, (item) => item.unitPrice)
+
     const lines: SaleLine[] = cart.map((item) => ({
       id: crypto.randomUUID(),
       productId: item.id,
@@ -512,10 +578,10 @@ export default function POSPage() {
       branchId,
       deviceId,
       cashierId: auth.userId,
-      subtotal: listTotal,
+      subtotal: checkoutTotals.listTotal,
       lineDiscountTotal,
       saleDiscountAmount: cartDiscountApplied,
-      total: subtotal - cartDiscountApplied,
+      total: checkoutTotals.grandTotal,
       createdAt: now,
       lines,
     }
@@ -540,7 +606,7 @@ export default function POSPage() {
 
     const updatedTxs = [...allTransactions, ...newTxs]
     setAllTransactions(updatedTxs)
-    setReceipt({ orderId: saleId, items: [...cart], total: sale.total })
+    setReceipt({ orderId: saleId, items: [...cart], totals: checkoutTotals })
     setCart([])
     setCartDiscountInput('')
     setCartDiscountApplied(0)
@@ -588,7 +654,7 @@ export default function POSPage() {
     const { generateReceiptPDF } = await import('@/lib/pdf')
     return generateReceiptPDF({
       orderId: receipt.orderId,
-      total: receipt.total,
+      total: receipt.totals.grandTotal,
       date: new Date().toLocaleDateString('en-KE', { year: 'numeric', month: 'long', day: 'numeric' }),
       items: receipt.items.map((i) => ({
         name: i.name,
@@ -610,6 +676,11 @@ export default function POSPage() {
   async function handleGenerateQuote() {
     if (!quoteForm.customerName.trim()) {
       toast.error('Customer name is required')
+      return
+    }
+    const pendingPrice = cart.some((item) => canSaveItemPrice(item))
+    if (pendingPrice) {
+      toast.warning('Apply pending line prices before generating a quote')
       return
     }
     setQuoteSending(true)
@@ -1060,26 +1131,7 @@ export default function POSPage() {
         </div>
 
         <div className="px-5 py-4 border-t border-gray-200 space-y-3">
-          {(totalDiscount > 0 || totalMarkup > 0) && (
-            <>
-              <div className="flex justify-between text-xs text-gray-500">
-                <span>List total</span>
-                <span className={totalDiscount > 0 ? 'line-through' : ''}>KES {listTotal.toLocaleString()}</span>
-              </div>
-              {totalDiscount > 0 && (
-                <div className="flex justify-between text-xs text-amber-600">
-                  <span>Line discounts</span>
-                  <span>−KES {totalDiscount.toLocaleString()}</span>
-                </div>
-              )}
-              {totalMarkup > 0 && (
-                <div className="flex justify-between text-xs text-blue-600">
-                  <span>Line markups</span>
-                  <span>+KES {totalMarkup.toLocaleString()}</span>
-                </div>
-              )}
-            </>
-          )}
+          {cart.length > 0 && <CartTotalsBreakdown totals={cartTotals} />}
           {cart.length > 0 && maxCartDisc > 0 && (
             <div className="space-y-1">
               <label className="text-xs text-gray-500">Cart discount (KES)</label>
@@ -1097,7 +1149,7 @@ export default function POSPage() {
           )}
           <div className="flex justify-between text-sm font-semibold">
             <span>Total</span>
-            <span>KES {(subtotal - cartDiscountApplied).toLocaleString()}</span>
+            <span>KES {cartTotals.grandTotal.toLocaleString()}</span>
           </div>
           <div className="flex gap-2">
             <button
@@ -1181,10 +1233,11 @@ export default function POSPage() {
                     ))}
                   </div>
                 </div>
-                <div className="shrink-0 border-t pt-3 mt-4">
-                  <div className="flex justify-between font-semibold text-sm mb-5">
+                <div className="shrink-0 border-t pt-3 mt-4 space-y-3">
+                  <CartTotalsBreakdown totals={receipt.totals} />
+                  <div className="flex justify-between font-semibold text-sm">
                     <span>Total</span>
-                    <span>KES {receipt.total.toLocaleString()}</span>
+                    <span>KES {receipt.totals.grandTotal.toLocaleString()}</span>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <button
@@ -1249,16 +1302,19 @@ export default function POSPage() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                 />
               </div>
-              <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-600 space-y-1">
+              <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-600 space-y-2">
                 {cart.map((i) => (
                   <div key={i.id} className="flex justify-between gap-3">
                     <span className="min-w-0">{i.name} × {i.qty}</span>
-                    <span className="shrink-0">KES {(i.unitPrice * i.qty).toLocaleString()}</span>
+                    <span className="shrink-0 tabular-nums">KES {(i.unitPrice * i.qty).toLocaleString()}</span>
                   </div>
                 ))}
-                <div className="flex justify-between font-semibold text-gray-800 border-t pt-1 mt-1">
+                <div className="border-t border-gray-200 pt-2">
+                  <CartTotalsBreakdown totals={cartTotals} />
+                </div>
+                <div className="flex justify-between font-semibold text-gray-800 border-t border-gray-200 pt-2">
                   <span>Total</span>
-                  <span>KES {subtotal.toLocaleString()}</span>
+                  <span className="tabular-nums">KES {cartTotals.grandTotal.toLocaleString()}</span>
                 </div>
               </div>
             </div>
