@@ -19,3 +19,18 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Safe-area padding for notched phones and PWA standalone */
+.safe-area-pb {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+}
+
+.safe-area-pt {
+  padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
+}
+
+/* Touch-optimized tap highlight suppression */
+[data-ui-mode="touch"] button,
+[data-ui-mode="mobile"] button {
+  -webkit-tap-highlight-color: transparent;
+}

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Building2, Check, FileText, GitBranch, Loader2, Mail, MapPin, Monitor, Pencil, Percent, Plus, Receipt, ScanBarcode, Shield, Star, Trash2, Upload, Users, X } from 'lucide-react'
+import { Building2, Check, FileText, GitBranch, Loader2, Mail, MapPin, Monitor, Pencil, Percent, Plus, Receipt, ScanBarcode, Shield, Smartphone, Star, Tablet, Trash2, Upload, Users, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { fetchSettings, saveSettings, fetchEmailSettings, saveEmailSettings, DEFAULT_SETTINGS, DEFAULT_EMAIL_SETTINGS, POS_LOOKUP_MODES, RECEIPT_FORMATS, type PDFSettings, type EmailSettings, type PosLookupMode, type ReceiptFormat } from '@/lib/settings'
 import { getMyBranchId, getMyOrgId, setMyBranchId } from '@/lib/branch'
@@ -10,6 +10,18 @@ import type { Branch } from '@/lib/types'
 import { TeamSection } from '@/components/settings/TeamSection'
 import { PermissionsSection } from '@/components/settings/PermissionsSection'
 import { fetchMe, canManageTeam, hasPermission } from '@/lib/auth'
+import {
+  DEVICE_UI_MODES,
+  getDeviceUiMode,
+  setDeviceUiMode,
+  type DeviceUiMode,
+} from '@/lib/device-ui'
+
+const DEVICE_UI_ICONS: Record<DeviceUiMode, typeof Monitor> = {
+  desktop: Monitor,
+  touch: Tablet,
+  mobile: Smartphone,
+}
 
 const COLORS = [
   { label: 'Blue',   value: '#2563eb' },
@@ -33,7 +45,7 @@ const TABS: { id: SettingsTab; label: string; description: string; icon: typeof 
   { id: 'branches',  label: 'Branches',  description: 'Create & manage branches',     icon: GitBranch },
   { id: 'team',      label: 'Team',      description: 'Staff, roles & PINs',          icon: Users },
   { id: 'permissions', label: 'Permissions', description: 'Role capability toggles', icon: Shield },
-  { id: 'device',    label: 'Device',    description: "This device's branch assignment", icon: Monitor },
+  { id: 'device',    label: 'Device',    description: "Branch & UI mode for this device", icon: Monitor },
 ]
 
 type BranchForm = { name: string; code: string; address: string }
@@ -65,6 +77,7 @@ export default function SettingsPage() {
   // Device tab state
   const [deviceBranchId, setDeviceBranchId] = useState<string | null>(null)
   const [deviceChanging, setDeviceChanging]  = useState(false)
+  const [deviceUiMode, setDeviceUiModeState] = useState<DeviceUiMode>('desktop')
   const [showTeamTab, setShowTeamTab] = useState(false)
   const [showPermissionsTab, setShowPermissionsTab] = useState(false)
 
@@ -85,6 +98,7 @@ export default function SettingsPage() {
     fetchSettings().then((s) => { setSettings(s); setLoading(false) })
     fetchEmailSettings().then(setEmailSettings)
     setDeviceBranchId(getMyBranchId())
+    setDeviceUiModeState(getDeviceUiMode())
   }, [])
 
   useEffect(() => {
@@ -236,6 +250,14 @@ export default function SettingsPage() {
     } finally {
       setBranchDeletingId(null)
     }
+  }
+
+  function handleDeviceUiModeChange(mode: DeviceUiMode) {
+    setDeviceUiMode(mode)
+    setDeviceUiModeState(mode)
+    document.documentElement.setAttribute('data-ui-mode', mode)
+    const label = DEVICE_UI_MODES.find((m) => m.value === mode)?.label ?? mode
+    toast.success(`UI mode set to ${label}`)
   }
 
   function handleDeviceBranchChange(newBranchId: string) {
@@ -1173,7 +1195,46 @@ export default function SettingsPage() {
 
                 <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
                   <div>
-                    <h3 className="text-sm font-semibold text-gray-800">This device's branch</h3>
+                    <h3 className="text-sm font-semibold text-gray-800">POS UI mode</h3>
+                    <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
+                      Choose how the register is laid out on this device. Touch and Mobile modes use
+                      larger controls optimized for finger input.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    {DEVICE_UI_MODES.map((mode) => {
+                      const Icon = DEVICE_UI_ICONS[mode.value]
+                      const selected = deviceUiMode === mode.value
+                      return (
+                        <button
+                          key={mode.value}
+                          type="button"
+                          onClick={() => handleDeviceUiModeChange(mode.value)}
+                          className={`w-full text-left rounded-xl border px-4 py-3 transition-colors flex items-start gap-3 ${
+                            selected
+                              ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500'
+                              : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >
+                          <span className={`inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0 ${selected ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>
+                            <Icon size={18} />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className={`block text-sm font-medium ${selected ? 'text-blue-800' : 'text-gray-800'}`}>
+                              {mode.label}
+                            </span>
+                            <span className="block text-xs text-gray-500 mt-0.5 leading-snug">{mode.description}</span>
+                          </span>
+                          {selected && <Check size={16} className="text-blue-600 shrink-0 mt-2" />}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </section>
+
+                <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-800">This device&apos;s branch</h3>
                     <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
                       Every sale, restock, and transfer on this device is recorded against this branch.
                       Changing it takes effect immediately.

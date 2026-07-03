@@ -22,6 +22,7 @@ import {
 import { BranchSetup } from '@/components/BranchSetup'
 import { PinLogin } from '@/components/PinLogin'
 import { getMyBranchId } from '@/lib/branch'
+import { getDeviceUiMode, type DeviceUiMode } from '@/lib/device-ui'
 import { getAll as getBranches } from '@/lib/db/branches'
 import { replaceCatalogFromServer } from '@/lib/db/seed'
 import { fetchMe, getCachedAuthUser, logout, type AuthUser, canViewReports, hasPermission } from '@/lib/auth'
@@ -63,10 +64,14 @@ export default function UILayout({ children }: { children: React.ReactNode }) {
   const [switching, setSwitching]         = useState(false)
   const [branchMenuOpen, setBranchMenuOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [deviceUiMode, setDeviceUiMode] = useState<DeviceUiMode>('desktop')
 
   useEffect(() => {
     const id = getMyBranchId()
+    const mode = getDeviceUiMode()
     setBranchId(id)
+    setDeviceUiMode(mode)
+    document.documentElement.setAttribute('data-ui-mode', mode)
     setMounted(true)
     setSidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true')
     if (id) {
@@ -320,7 +325,9 @@ export default function UILayout({ children }: { children: React.ReactNode }) {
         {children}
       </main>
 
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-gray-200 bg-white/95 backdrop-blur-sm safe-area-pb">
+      <nav className={`md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-gray-200 bg-white/95 backdrop-blur-sm safe-area-pb ${
+        deviceUiMode === 'mobile' && pathname === '/pos' ? 'hidden' : ''
+      }`}>
         <div className="flex items-stretch justify-around px-1 pt-1 pb-2">
           {visibleNav.map(({ href, label, icon: Icon }) => {
             const active = isActive(href)

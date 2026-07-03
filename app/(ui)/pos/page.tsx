@@ -23,6 +23,17 @@ import { buildStockByProductId, getLowStockItems, LOW_STOCK_THRESHOLD } from '@/
 import { getBrandOptions, getProductBrand, matchesProductSearch } from '@/lib/brands'
 import { barcodeSearchEnabled, findProductByExactBarcode } from '@/lib/product-search'
 import { getDeviceId } from '@/lib/device'
+import {
+  getDeviceUiMode,
+  isTouchOptimized,
+  posActionBtnClass,
+  posDialogContentClass,
+  posProductCardClass,
+  posProductGridClass,
+  posProductImageClass,
+  posQtyBtnClass,
+  type DeviceUiMode,
+} from '@/lib/device-ui'
 import { INCIDENT_REASON_LABELS } from '@/lib/types'
 import { fetchSettings, type PosLookupMode } from '@/lib/settings'
 import { canDiscount, clampUnitPrice, DEFAULT_MIN_MARKUP_PERCENT, discountPerUnit, effectiveLowestPrice } from '@/lib/pricing'
@@ -73,6 +84,8 @@ export default function POSPage() {
   const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({})
   const [cartDiscountInput, setCartDiscountInput] = useState('')
   const [cartDiscountApplied, setCartDiscountApplied] = useState(0)
+  const [deviceUiMode, setDeviceUiMode] = useState<DeviceUiMode>('desktop')
+  const [cartOpen, setCartOpen] = useState(false)
   const alertedIds = useRef<Set<string>>(new Set())
   const skipCartPersist = useRef(true)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -102,6 +115,14 @@ export default function POSPage() {
     }, 400)
     return () => window.clearTimeout(persistTimer)
   }, [cart])
+
+  useEffect(() => {
+    setDeviceUiMode(getDeviceUiMode())
+  }, [])
+
+  const touchMode = isTouchOptimized(deviceUiMode)
+  const mobilePos = deviceUiMode === 'mobile'
+  const cartItemCount = cart.reduce((s, i) => s + i.qty, 0)
 
   useEffect(() => {
     const onOnline = () => { setOffline(false); drain().catch(() => {}); drainProductSync().catch(() => {}); drainIncident().catch(() => {}); drainSales().catch(() => {}) }
@@ -270,6 +291,7 @@ export default function POSPage() {
       if (existing) return prev.map((i) => i.id === product.id ? { ...i, qty: i.qty + 1 } : i)
       return [...prev, { ...product, qty: 1, unitPrice: product.sellingPrice }]
     })
+    if (deviceUiMode === 'mobile') setCartOpen(true)
   }
 
   function handleProductClick(product: Product) {
@@ -650,7 +672,7 @@ export default function POSPage() {
   const reasonOptions = Object.entries(INCIDENT_REASON_LABELS) as [IncidentReason, string][]
 
   return (
-    <div className="flex flex-col md:flex-row flex-1 h-screen overflow-hidden">
+    <div className={`flex flex-col md:flex-row flex-1 overflow-hidden ${mobilePos ? 'h-dvh' : 'h-screen'}`}>
       {offline && (
         <div className="fixed top-3 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-amber-50 border border-amber-300 text-amber-800 text-xs px-3 py-1.5 rounded-full shadow">
           <WifiOff size={13} />
@@ -673,7 +695,10 @@ export default function POSPage() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={handleSearchKeyDown}
                 placeholder={searchPlaceholder}
-                className="w-full border border-gray-200 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 focus:bg-white transition-colors"
+                inputMode={barcodeEnabled ? 'numeric' : 'search'}
+                className={`w-full border border-gray-200 rounded-xl pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 focus:bg-white transition-colors ${
+                  touchMode ? 'py-3 text-base' : 'py-2'
+                }`}
               />
               {search && (
                 <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
@@ -720,7 +745,7 @@ export default function POSPage() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 pb-6">
+        <div className={`flex-1 overflow-y-auto px-4 md:px-6 pb-6 ${mobilePos ? 'pb-28' : touchMode ? 'pb-8' : ''}`}>
           {visible.length === 0 ? (
             <div className="text-center mt-16 space-y-2">
               <p className="text-sm text-gray-500">No products found</p>
@@ -736,35 +761,34 @@ export default function POSPage() {
             </div>
           ) : (
             <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 pt-3">
+            <div className={posProductGridClass(deviceUiMode)}>
               {paginatedVisible.map((p) => {
                 const stock = stockByProductId[p.id] ?? (p.initialStock ?? 0)
                 const isOut = stock <= 0
                 const isLow = stock < LOW_STOCK_THRESHOLD
+                const stockClass = isOut
+                  ? 'border-red-300 bg-red-50'
+                  : isLow
+                    ? 'border-amber-300 bg-amber-50'
+                    : 'border-gray-200'
                 return (
                   <button
                     key={p.id}
                     type="button"
                     onClick={() => handleProductClick(p)}
                     title={isOut ? 'Out of stock — open Products to restock' : isLow ? 'Low stock — open Products to restock' : undefined}
-                    className={`text-left border rounded-xl overflow-hidden transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                      isOut
-                        ? 'border-red-300 bg-red-50 hover:border-red-400'
-                        : isLow
-                          ? 'border-amber-300 bg-amber-50 hover:border-amber-400'
-                          : 'border-gray-200 hover:border-blue-400 hover:bg-blue-50'
-                    }`}
+                    className={posProductCardClass(deviceUiMode, stockClass)}
                   >
                     {p.imageUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.imageUrl} alt={p.name} loading="lazy" decoding="async" className="w-full h-28 object-cover" />
+                      <img src={p.imageUrl} alt={p.name} loading="lazy" decoding="async" className={posProductImageClass(deviceUiMode)} />
                     ) : (
-                      <div className={`w-full h-28 flex items-center justify-center ${isLow ? 'bg-amber-100/60' : 'bg-gray-100'}`}>
-                        <ImageOff size={22} className="text-gray-300" />
+                      <div className={`w-full flex items-center justify-center ${touchMode ? 'h-32' : 'h-28'} ${isLow ? 'bg-amber-100/60' : 'bg-gray-100'} ${mobilePos ? '!h-36' : ''}`}>
+                        <ImageOff size={touchMode ? 26 : 22} className="text-gray-300" />
                       </div>
                     )}
-                    <div className="p-3">
-                      <p className="font-medium text-sm leading-snug">{p.name}</p>
+                    <div className={touchMode ? 'p-3.5' : 'p-3'}>
+                      <p className={`font-medium leading-snug ${touchMode ? 'text-base' : 'text-sm'}`}>{p.name}</p>
                       <p className="text-xs text-gray-400 font-mono mt-0.5">{p.sku}</p>
                       {p.specification && (
                         <p className="text-xs text-gray-500 mt-0.5">{p.specification}</p>
@@ -792,18 +816,22 @@ export default function POSPage() {
                   type="button"
                   disabled={productPage === 1}
                   onClick={() => setProductPage((p) => p - 1)}
-                  className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+                  className={`rounded-lg border border-gray-200 font-medium text-gray-700 disabled:opacity-40 ${
+                    touchMode ? 'min-h-11 px-5 py-2.5 text-sm active:bg-gray-100 active:scale-95' : 'px-3 py-1.5 text-xs hover:bg-gray-50'
+                  }`}
                 >
                   Previous
                 </button>
-                <span className="text-xs text-gray-500 tabular-nums px-2">
+                <span className={`text-gray-500 tabular-nums px-2 ${touchMode ? 'text-sm' : 'text-xs'}`}>
                   {(productPage - 1) * POS_PAGE_SIZE + 1}–{Math.min(productPage * POS_PAGE_SIZE, visible.length)} of {visible.length.toLocaleString()}
                 </span>
                 <button
                   type="button"
                   disabled={productPage === productPageCount}
                   onClick={() => setProductPage((p) => p + 1)}
-                  className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+                  className={`rounded-lg border border-gray-200 font-medium text-gray-700 disabled:opacity-40 ${
+                    touchMode ? 'min-h-11 px-5 py-2.5 text-sm active:bg-gray-100 active:scale-95' : 'px-3 py-1.5 text-xs hover:bg-gray-50'
+                  }`}
                 >
                   Next
                 </button>
@@ -815,14 +843,40 @@ export default function POSPage() {
       </div>
 
       {/* Right: cart */}
-      <aside className="w-full md:w-80 border-t md:border-t-0 md:border-l border-gray-200 flex flex-col bg-gray-50 flex-[0_0_auto] max-h-[50vh] md:max-h-full">
-        <div className="flex items-center gap-2 px-5 py-4 border-b border-gray-200">
-          <ShoppingCart size={18} className="text-gray-500" />
-          <span className="font-semibold text-sm">Cart</span>
+      {(!mobilePos || cartOpen) && (
+        <>
+          {mobilePos && (
+            <button
+              type="button"
+              className="fixed inset-0 bg-black/40 z-40"
+              onClick={() => setCartOpen(false)}
+              aria-label="Close cart"
+            />
+          )}
+      <aside className={
+        mobilePos
+          ? 'fixed inset-x-0 bottom-0 z-50 w-full max-h-[88vh] rounded-t-2xl border-t border-gray-200 flex flex-col bg-gray-50 safe-area-pb shadow-2xl'
+          : `w-full md:w-80 border-t md:border-t-0 md:border-l border-gray-200 flex flex-col bg-gray-50 flex-[0_0_auto] ${
+              deviceUiMode === 'touch' ? 'max-h-[60vh] md:max-h-full' : 'max-h-[50vh] md:max-h-full'
+            }`
+      }>
+        <div className={`flex items-center gap-2 px-5 border-b border-gray-200 ${touchMode ? 'py-4' : 'py-4'}`}>
+          <ShoppingCart size={touchMode ? 20 : 18} className="text-gray-500" />
+          <span className={`font-semibold ${touchMode ? 'text-base' : 'text-sm'}`}>Cart</span>
           {cart.length > 0 && (
-            <span className="ml-auto text-xs bg-blue-600 text-white rounded-full px-2 py-0.5">
-              {cart.reduce((s, i) => s + i.qty, 0)}
+            <span className={`ml-auto bg-blue-600 text-white rounded-full ${touchMode ? 'text-sm px-2.5 py-0.5' : 'text-xs px-2 py-0.5'}`}>
+              {cartItemCount}
             </span>
+          )}
+          {mobilePos && (
+            <button
+              type="button"
+              onClick={() => setCartOpen(false)}
+              className="ml-2 min-h-10 min-w-10 flex items-center justify-center rounded-lg text-gray-500 hover:bg-gray-200 active:scale-95"
+              aria-label="Close cart"
+            >
+              <X size={20} />
+            </button>
           )}
         </div>
 
@@ -850,10 +904,14 @@ export default function POSPage() {
                     <button
                       type="button"
                       onClick={() => removeFromCart(item.id)}
-                      className="p-1 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 shrink-0"
+                      className={`rounded-md text-gray-400 shrink-0 ${
+                        touchMode
+                          ? 'min-h-10 min-w-10 flex items-center justify-center active:bg-red-50 active:text-red-600 active:scale-95'
+                          : 'p-1 hover:text-red-600 hover:bg-red-50'
+                      }`}
                       title="Remove from cart"
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={touchMode ? 18 : 14} />
                     </button>
                   </div>
 
@@ -904,13 +962,17 @@ export default function POSPage() {
                           </button>
                         )}
                       </div>
-                      <div className="flex gap-1">
+                      <div className={`flex gap-1 ${touchMode ? 'gap-2' : ''}`}>
                         {[5, 10, 15].map((pct) => (
                           <button
                             key={pct}
                             type="button"
                             onClick={() => applyDiscountPercent(item.id, pct)}
-                            className="flex-1 text-[10px] py-1 rounded border border-gray-200 text-gray-600 hover:bg-white hover:border-amber-300 hover:text-amber-800 transition-colors"
+                            className={`flex-1 rounded border border-gray-200 text-gray-600 transition-colors ${
+                              touchMode
+                                ? 'min-h-10 text-sm active:bg-white active:border-amber-300 active:text-amber-800 active:scale-95'
+                                : 'text-[10px] py-1 hover:bg-white hover:border-amber-300 hover:text-amber-800'
+                            }`}
                           >
                             −{pct}%
                           </button>
@@ -920,10 +982,14 @@ export default function POSPage() {
                   )}
 
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1">
-                      <button type="button" onClick={() => setQty(item.id, -1)} className="p-1 rounded-md hover:bg-gray-100 border border-gray-200"><Minus size={12} /></button>
-                      <span className="text-sm w-6 text-center tabular-nums">{item.qty}</span>
-                      <button type="button" onClick={() => setQty(item.id, 1)} className="p-1 rounded-md hover:bg-gray-100 border border-gray-200"><Plus size={12} /></button>
+                    <div className={`flex items-center ${touchMode ? 'gap-2' : 'gap-1'}`}>
+                      <button type="button" onClick={() => setQty(item.id, -1)} className={posQtyBtnClass(deviceUiMode)}>
+                        <Minus size={touchMode ? 18 : 12} />
+                      </button>
+                      <span className={`text-center tabular-nums font-medium ${touchMode ? 'text-base w-8' : 'text-sm w-6'}`}>{item.qty}</span>
+                      <button type="button" onClick={() => setQty(item.id, 1)} className={posQtyBtnClass(deviceUiMode)}>
+                        <Plus size={touchMode ? 18 : 12} />
+                      </button>
                     </div>
                     <span className="text-sm font-semibold tabular-nums">
                       KES {(item.unitPrice * item.qty).toLocaleString()}
@@ -971,32 +1037,60 @@ export default function POSPage() {
             <button
               onClick={() => setQuoteOpen(true)}
               disabled={cart.length === 0}
-              className="flex items-center gap-1.5 border border-gray-300 px-3 py-2.5 rounded-xl text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-40 transition-colors"
+              className={`flex items-center gap-1.5 border border-gray-300 px-3 rounded-xl text-gray-700 disabled:opacity-40 transition-colors ${
+                touchMode ? 'min-h-12 py-3 text-base active:bg-gray-100 active:scale-[0.98]' : 'py-2.5 text-sm hover:bg-gray-100'
+              }`}
               title="Generate quotation PDF"
             >
-              <FileText size={14} />
+              <FileText size={touchMode ? 16 : 14} />
               Quote
             </button>
-            <button onClick={checkout} disabled={cart.length === 0 || checking}
-              className="flex-1 bg-blue-600 text-white py-2.5 rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-40 transition-colors">
+            <button
+              onClick={() => { checkout(); if (mobilePos) setCartOpen(false) }}
+              disabled={cart.length === 0 || checking}
+              className={`flex-1 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 disabled:opacity-40 transition-colors ${posActionBtnClass(deviceUiMode)} ${
+                touchMode ? 'py-3 active:bg-blue-800' : 'py-2.5'
+              }`}
+            >
               {checking ? 'Processing…' : 'Checkout'}
             </button>
           </div>
           <button
             onClick={() => { setIncidentOpen(true); setIncidentDrafts([]); setIncidentSearch('') }}
-            className="w-full flex items-center justify-center gap-1.5 border border-amber-300 text-amber-700 py-2 rounded-xl text-xs font-medium hover:bg-amber-50 transition-colors"
+            className={`w-full flex items-center justify-center gap-1.5 border border-amber-300 text-amber-700 rounded-xl font-medium transition-colors ${
+              touchMode ? 'min-h-11 py-3 text-sm active:bg-amber-50 active:scale-[0.98]' : 'py-2 text-xs hover:bg-amber-50'
+            }`}
           >
-            <AlertCircle size={13} />
+            <AlertCircle size={touchMode ? 15 : 13} />
             Log missed sale
           </button>
         </div>
       </aside>
+        </>
+      )}
+
+      {mobilePos && (
+        <button
+          type="button"
+          onClick={() => setCartOpen(true)}
+          className="fixed bottom-5 right-4 z-30 flex items-center gap-2 bg-blue-600 text-white pl-4 pr-5 py-3.5 rounded-full shadow-lg active:scale-95 active:bg-blue-700 safe-area-pb"
+          aria-label="Open cart"
+        >
+          <ShoppingCart size={22} />
+          <span className="font-semibold text-base">Cart</span>
+          {cartItemCount > 0 && (
+            <span className="bg-white text-blue-600 text-sm font-bold rounded-full min-w-6 h-6 flex items-center justify-center px-1.5">
+              {cartItemCount}
+            </span>
+          )}
+        </button>
+      )}
 
       {/* Receipt modal */}
       <Dialog.Root open={!!receipt} onOpenChange={(v) => !v && setReceipt(null)}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40" />
-          <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm z-50 focus:outline-none">
+          <Dialog.Content className={posDialogContentClass(deviceUiMode)}>
             <div className="flex items-center justify-between mb-4">
               <Dialog.Title className="text-lg font-semibold">Receipt</Dialog.Title>
               <Dialog.Close asChild>
@@ -1047,7 +1141,7 @@ export default function POSPage() {
       <Dialog.Root open={quoteOpen} onOpenChange={setQuoteOpen}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40" />
-          <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm z-50 focus:outline-none">
+          <Dialog.Content className={posDialogContentClass(deviceUiMode)}>
             <div className="flex items-center justify-between mb-4">
               <Dialog.Title className="text-lg font-semibold">Generate Quotation</Dialog.Title>
               <Dialog.Close asChild>
@@ -1121,7 +1215,7 @@ export default function POSPage() {
       <Dialog.Root open={incidentOpen} onOpenChange={setIncidentOpen}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40" />
-          <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-2xl p-6 w-full max-w-lg z-50 focus:outline-none max-h-[90vh] overflow-y-auto">
+          <Dialog.Content className={`${posDialogContentClass(deviceUiMode, 'max-w-lg')} max-h-[90vh]`}>
             <div className="flex items-center justify-between mb-4">
               <Dialog.Title className="text-lg font-semibold">Log Missed Sale</Dialog.Title>
               <Dialog.Close asChild>
