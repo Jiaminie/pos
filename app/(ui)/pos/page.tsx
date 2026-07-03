@@ -10,10 +10,10 @@ import { AlertCircle, ChevronDown, FileText, ImageOff, Minus, Plus, Printer, Sea
 import { toast } from 'sonner'
 import { createMany as createManyTransactions } from '@/lib/db/transactions'
 import { drain } from '@/lib/db/syncQueue'
-import { drain as drainProductSync } from '@/lib/db/productSyncQueue'
+import { drain as drainProductSync, push as pushProductSync } from '@/lib/db/productSyncQueue'
 import { create as createSale, type Sale } from '@/lib/db/sales'
 import { push as pushSale, drain as drainSales } from '@/lib/db/salesSyncQueue'
-import { getAll as getProducts } from '@/lib/db/products'
+import { getAll as getProducts, upsertMany as upsertProducts } from '@/lib/db/products'
 import { getAll as getCategories } from '@/lib/db/categories'
 import { normalizeQuery } from '@/lib/normalize'
 import { getAll as getTransactions } from '@/lib/db/transactions'
@@ -83,6 +83,7 @@ export default function POSPage() {
   const [minMarkupPercent, setMinMarkupPercent] = useState(DEFAULT_MIN_MARKUP_PERCENT)
   const [posLookupMode, setPosLookupMode] = useState<PosLookupMode>('catalog')
   const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({})
+  const [savingPriceId, setSavingPriceId] = useState<string | null>(null)
   const [cartDiscountInput, setCartDiscountInput] = useState('')
   const [cartDiscountApplied, setCartDiscountApplied] = useState(0)
   const [deviceUiMode, setDeviceUiMode] = useState<DeviceUiMode>('desktop')
@@ -369,25 +370,64 @@ export default function POSPage() {
     })
   }
 
-  function commitItemPriceDraft(id: string) {
-    const draft = priceDrafts[id]
-    if (draft === undefined) return
-    setItemPrice(id, draft)
-    clearPriceDraft(id)
+  function priceDraftValue(item: CartItem): string {
+    return priceDrafts[item.id] ?? String(item.unitPrice)
   }
 
-  function setItemPrice(id: string, raw: string) {
-    const val = parseFloat(raw)
-    if (isNaN(val)) return
-    setCart((prev) => prev.map((item) => {
-      if (item.id !== id) return item
-      const min = effectiveLowestPrice(item, minMarkupPercent)
-      const clamped = clampUnitPrice(item, val, minMarkupPercent)
-      if (val < min) {
-        toast.warning(`Min price for ${item.name} is KES ${min.toLocaleString()}`)
+  function canSaveItemPrice(item: CartItem): boolean {
+    const val = parseFloat(priceDraftValue(item))
+    if (isNaN(val)) return false
+    const clamped = clampUnitPrice(item, val, minMarkupPercent)
+    return clamped !== item.unitPrice || clamped !== item.sellingPrice
+  }
+
+  async function saveItemPrice(id: string) {
+    const item = cart.find((i) => i.id === id)
+    if (!item || !canDiscount(item, minMarkupPercent)) return
+
+    const draft = priceDraftValue(item)
+    const val = parseFloat(draft)
+    if (isNaN(val)) {
+      toast.error('Enter a valid price')
+      return
+    }
+
+    const min = effectiveLowestPrice(item, minMarkupPercent)
+    const clamped = clampUnitPrice(item, val, minMarkupPercent)
+    if (val < min) {
+      toast.warning(`Min price for ${item.name} is KES ${min.toLocaleString()}`)
+    }
+
+    if (clamped === item.unitPrice && clamped === item.sellingPrice) {
+      clearPriceDraft(id)
+      return
+    }
+
+    setSavingPriceId(id)
+    try {
+      const { qty: _qty, unitPrice: _unitPrice, ...productFields } = item
+      const updatedProduct: Product = { ...productFields, sellingPrice: clamped }
+
+      setCart((prev) =>
+        prev.map((i) =>
+          i.id === id ? { ...i, unitPrice: clamped, sellingPrice: clamped } : i,
+        ),
+      )
+      clearPriceDraft(id)
+
+      if (clamped !== item.sellingPrice) {
+        await upsertProducts([updatedProduct])
+        setProducts((prev) => prev.map((p) => (p.id === id ? updatedProduct : p)))
+        await pushProductSync({ id, method: 'PATCH', body: { sellingPrice: clamped } })
+        void drainProductSync()
       }
-      return { ...item, unitPrice: clamped }
-    }))
+
+      toast.success(`Price saved at KES ${clamped.toLocaleString()}`)
+    } catch {
+      toast.error('Could not save price')
+    } finally {
+      setSavingPriceId(null)
+    }
   }
 
   function applyDiscountPercent(id: string, percent: number) {
@@ -890,7 +930,8 @@ export default function POSPage() {
               const floor = discountable ? effectiveLowestPrice(item, minMarkupPercent) : 0
               const currentDisc = discountPerUnit(item.sellingPrice, item.unitPrice)
               const discPct = item.sellingPrice > 0 ? Math.round((currentDisc / item.sellingPrice) * 100) : 0
-              const priceDraft = priceDrafts[item.id] ?? String(item.unitPrice)
+              const priceDraft = priceDraftValue(item)
+              const priceSavePending = canSaveItemPrice(item)
               return (
                 <div key={item.id} className="rounded-lg border border-gray-200 bg-white p-2.5 space-y-2">
                   <div className="flex items-start gap-1">
@@ -938,14 +979,26 @@ export default function POSPage() {
                           step="1"
                           value={priceDraft}
                           onChange={(e) => setPriceDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                          onBlur={() => commitItemPriceDraft(item.id)}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
-                              e.currentTarget.blur()
+                              e.preventDefault()
+                              void saveItemPrice(item.id)
                             }
                           }}
                           className="flex-1 min-w-0 border border-gray-200 rounded-md px-2 py-1 text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
                         />
+                        <button
+                          type="button"
+                          onClick={() => void saveItemPrice(item.id)}
+                          disabled={!priceSavePending || savingPriceId === item.id}
+                          className={`shrink-0 rounded-md px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-40 ${
+                            priceSavePending
+                              ? 'bg-blue-600 text-white hover:bg-blue-700'
+                              : 'bg-gray-100 text-gray-400'
+                          }`}
+                        >
+                          {savingPriceId === item.id ? '…' : 'Save'}
+                        </button>
                       </div>
                       <div className="flex items-center justify-between gap-1">
                         <p className="text-[10px] text-gray-500 tabular-nums">
