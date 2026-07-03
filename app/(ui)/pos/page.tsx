@@ -28,6 +28,7 @@ import {
   isTouchOptimized,
   posActionBtnClass,
   posDialogContentClass,
+  posDialogBodyClass,
   posProductCardClass,
   posProductGridClass,
   posProductImageClass,
@@ -1091,7 +1092,7 @@ export default function POSPage() {
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40" />
           <Dialog.Content className={posDialogContentClass(deviceUiMode)}>
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 shrink-0">
               <Dialog.Title className="text-lg font-semibold">Receipt</Dialog.Title>
               <Dialog.Close asChild>
                 <button className="text-gray-500 hover:text-gray-600 p-1 rounded-md"><X size={18} /></button>
@@ -1099,37 +1100,41 @@ export default function POSPage() {
             </div>
             {receipt && (
               <>
-                <p className="text-xs text-gray-500 font-mono mb-4 break-all">Order {receipt.orderId}</p>
-                <div className="space-y-2 mb-4">
-                  {receipt.items.map((item) => (
-                    <div key={item.id} className="flex justify-between text-sm">
-                      <span>{item.name} × {item.qty}</span>
-                      <div className="text-right">
-                        {item.unitPrice < item.sellingPrice && (
-                          <span className="text-xs text-amber-600 mr-1">discounted</span>
-                        )}
-                        <span>KES {(item.unitPrice * item.qty).toLocaleString()}</span>
+                <div className={posDialogBodyClass()}>
+                  <p className="text-xs text-gray-500 font-mono mb-4 break-all">Order {receipt.orderId}</p>
+                  <div className="space-y-2">
+                    {receipt.items.map((item) => (
+                      <div key={item.id} className="flex justify-between text-sm gap-3">
+                        <span className="min-w-0">{item.name} × {item.qty}</span>
+                        <div className="text-right shrink-0">
+                          {item.unitPrice < item.sellingPrice && (
+                            <span className="text-xs text-amber-600 mr-1">discounted</span>
+                          )}
+                          <span>KES {(item.unitPrice * item.qty).toLocaleString()}</span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-                <div className="border-t pt-3 flex justify-between font-semibold text-sm">
-                  <span>Total</span>
-                  <span>KES {receipt.total.toLocaleString()}</span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 mt-5">
-                  <button
-                    onClick={handlePrintReceipt}
-                    className="py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-1.5"
-                  >
-                    <Printer size={14} />
-                    Print
-                  </button>
-                  <Dialog.Close asChild>
-                    <button className="border border-gray-300 py-2.5 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
-                      Cancel
+                <div className="shrink-0 border-t pt-3 mt-4">
+                  <div className="flex justify-between font-semibold text-sm mb-5">
+                    <span>Total</span>
+                    <span>KES {receipt.total.toLocaleString()}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={handlePrintReceipt}
+                      className="py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <Printer size={14} />
+                      Print
                     </button>
-                  </Dialog.Close>
+                    <Dialog.Close asChild>
+                      <button className="border border-gray-300 py-2.5 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
+                        Cancel
+                      </button>
+                    </Dialog.Close>
+                  </div>
                 </div>
               </>
             )}
@@ -1142,13 +1147,13 @@ export default function POSPage() {
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40" />
           <Dialog.Content className={posDialogContentClass(deviceUiMode)}>
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 shrink-0">
               <Dialog.Title className="text-lg font-semibold">Generate Quotation</Dialog.Title>
               <Dialog.Close asChild>
                 <button className="text-gray-500 hover:text-gray-600 p-1 rounded-md"><X size={18} /></button>
               </Dialog.Close>
             </div>
-            <div className="space-y-3">
+            <div className={`${posDialogBodyClass()} space-y-3`}>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Customer Name *</label>
                 <input
@@ -1181,9 +1186,9 @@ export default function POSPage() {
               </div>
               <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-600 space-y-1">
                 {cart.map((i) => (
-                  <div key={i.id} className="flex justify-between">
-                    <span>{i.name} × {i.qty}</span>
-                    <span>KES {(i.unitPrice * i.qty).toLocaleString()}</span>
+                  <div key={i.id} className="flex justify-between gap-3">
+                    <span className="min-w-0">{i.name} × {i.qty}</span>
+                    <span className="shrink-0">KES {(i.unitPrice * i.qty).toLocaleString()}</span>
                   </div>
                 ))}
                 <div className="flex justify-between font-semibold text-gray-800 border-t pt-1 mt-1">
@@ -1192,7 +1197,7 @@ export default function POSPage() {
                 </div>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2 mt-5">
+            <div className="grid grid-cols-2 gap-2 mt-5 shrink-0">
               <button
                 onClick={handleGenerateQuote}
                 disabled={quoteSending}
@@ -1215,7 +1220,7 @@ export default function POSPage() {
       <Dialog.Root open={incidentOpen} onOpenChange={setIncidentOpen}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40" />
-          <Dialog.Content className={`${posDialogContentClass(deviceUiMode, 'max-w-lg')} max-h-[90vh]`}>
+          <Dialog.Content className={posDialogContentClass(deviceUiMode, 'max-w-lg')}>
             <div className="flex items-center justify-between mb-4">
               <Dialog.Title className="text-lg font-semibold">Log Missed Sale</Dialog.Title>
               <Dialog.Close asChild>

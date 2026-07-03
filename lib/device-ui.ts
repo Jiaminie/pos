@@ -49,14 +49,19 @@ export function isTouchOptimized(mode: DeviceUiMode): boolean {
 
 /** Radix dialog content classes — bottom sheet on mobile, centered otherwise. */
 export function posDialogContentClass(mode: DeviceUiMode, maxWidth = 'max-w-sm'): string {
-  const base = 'fixed z-50 bg-white shadow-2xl focus:outline-none overflow-y-auto'
+  const base = 'fixed z-50 bg-white shadow-2xl focus:outline-none flex flex-col overflow-hidden max-h-[min(90vh,40rem)]'
   if (mode === 'mobile') {
-    return `${base} max-h-[92vh] inset-x-0 bottom-0 rounded-t-2xl p-5 pb-8 w-full safe-area-pb`
+    return `${base} inset-x-0 bottom-0 rounded-t-2xl p-5 pb-8 w-full safe-area-pb`
   }
   if (mode === 'touch') {
     return `${base} top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-2xl p-6 w-[calc(100%-2rem)] ${maxWidth}`
   }
   return `${base} top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-xl p-6 w-full ${maxWidth}`
+}
+
+/** Scrollable body region inside a POS dialog (keeps header/footer pinned). */
+export function posDialogBodyClass(): string {
+  return 'flex-1 min-h-0 overflow-y-auto'
 }
 
 /** Primary action button sizing for POS checkout area. */
@@ -96,6 +101,8 @@ export function posProductImageClass(mode: DeviceUiMode): string {
 export function posProductCardClass(mode: DeviceUiMode, stockClass: string): string {
   const feedback = isTouchOptimized(mode)
     ? 'active:scale-[0.98] active:brightness-95'
-    : 'hover:border-blue-400 hover:bg-blue-50'
-  return `text-left border rounded-xl overflow-hidden transition-transform focus:outline-none focus:ring-2 focus:ring-blue-500 ${feedback} ${stockClass}`
+    : 'hover:border-gray-300 hover:bg-gray-50 hover:shadow-sm'
+  const focus =
+    'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2'
+  return `text-left border rounded-xl overflow-hidden transition-all ${focus} ${feedback} ${stockClass}`
 }
