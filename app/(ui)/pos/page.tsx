@@ -6,7 +6,7 @@ import { BrandPicker } from '@/components/pos/BrandPicker'
 import { CategoryPicker } from '@/components/pos/CategoryPicker'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Select from '@radix-ui/react-select'
-import { AlertCircle, ChevronDown, Eye, FileText, ImageOff, Minus, Plus, Printer, Search, ShoppingCart, Trash2, WifiOff, X } from 'lucide-react'
+import { AlertCircle, ChevronDown, FileText, ImageOff, Minus, Plus, Printer, Search, ShoppingCart, Trash2, WifiOff, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { createMany as createManyTransactions } from '@/lib/db/transactions'
 import { drain } from '@/lib/db/syncQueue'
@@ -70,7 +70,7 @@ export default function POSPage() {
   const [incidentSaving, setIncidentSaving] = useState(false)
   const [minMarkupPercent, setMinMarkupPercent] = useState(DEFAULT_MIN_MARKUP_PERCENT)
   const [posLookupMode, setPosLookupMode] = useState<PosLookupMode>('catalog')
-  const [discountEditId, setDiscountEditId] = useState<string | null>(null)
+  const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({})
   const [cartDiscountInput, setCartDiscountInput] = useState('')
   const [cartDiscountApplied, setCartDiscountApplied] = useState(0)
   const alertedIds = useRef<Set<string>>(new Set())
@@ -330,7 +330,27 @@ export default function POSPage() {
 
   function removeFromCart(id: string) {
     setCart((prev) => prev.filter((i) => i.id !== id))
-    setDiscountEditId((cur) => (cur === id ? null : cur))
+    setPriceDrafts((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+  }
+
+  function clearPriceDraft(id: string) {
+    setPriceDrafts((prev) => {
+      if (!(id in prev)) return prev
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+  }
+
+  function commitItemPriceDraft(id: string) {
+    const draft = priceDrafts[id]
+    if (draft === undefined) return
+    setItemPrice(id, draft)
+    clearPriceDraft(id)
   }
 
   function setItemPrice(id: string, raw: string) {
@@ -348,6 +368,7 @@ export default function POSPage() {
   }
 
   function applyDiscountPercent(id: string, percent: number) {
+    clearPriceDraft(id)
     setCart((prev) => prev.map((item) => {
       if (item.id !== id) return item
       const target = item.sellingPrice * (1 - percent / 100)
@@ -356,6 +377,7 @@ export default function POSPage() {
   }
 
   function resetItemPrice(id: string) {
+    clearPriceDraft(id)
     setCart((prev) => prev.map((item) =>
       item.id === id ? { ...item, unitPrice: item.sellingPrice } : item
     ))
@@ -398,8 +420,6 @@ export default function POSPage() {
         qty: item.qty,
       })), minMarkupPercent)
     : 0
-  const discountEditItem = discountEditId ? cart.find((i) => i.id === discountEditId) ?? null : null
-
   async function checkout() {
     setChecking(true)
     const auth = getCachedAuthUser()
@@ -812,26 +832,21 @@ export default function POSPage() {
           ) : (
             cart.map((item) => {
               const discountable = canDiscount(item, minMarkupPercent)
+              const floor = discountable ? effectiveLowestPrice(item, minMarkupPercent) : 0
+              const currentDisc = discountPerUnit(item.sellingPrice, item.unitPrice)
+              const discPct = item.sellingPrice > 0 ? Math.round((currentDisc / item.sellingPrice) * 100) : 0
+              const priceDraft = priceDrafts[item.id] ?? String(item.unitPrice)
               return (
-                <div key={item.id} className="group rounded-lg border border-gray-200 bg-white p-2.5 space-y-2">
+                <div key={item.id} className="rounded-lg border border-gray-200 bg-white p-2.5 space-y-2">
                   <div className="flex items-start gap-1">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{item.name}</p>
-                      <p className="text-xs text-gray-500 tabular-nums">
-                        KES {item.unitPrice.toLocaleString()}
-                      </p>
+                      {!discountable && (
+                        <p className="text-xs text-gray-500 tabular-nums">
+                          KES {item.unitPrice.toLocaleString()}
+                        </p>
+                      )}
                     </div>
-                    {discountable && (
-                      <button
-                        type="button"
-                        onClick={() => setDiscountEditId(item.id)}
-                        className="p-1 rounded-md text-gray-400 opacity-0 group-hover:opacity-50 hover:!opacity-100 focus:opacity-100 hover:bg-gray-100 shrink-0 transition-opacity"
-                        title="Adjust price"
-                        aria-label="Adjust price"
-                      >
-                        <Eye size={13} />
-                      </button>
-                    )}
                     <button
                       type="button"
                       onClick={() => removeFromCart(item.id)}
@@ -841,6 +856,69 @@ export default function POSPage() {
                       <Trash2 size={14} />
                     </button>
                   </div>
+
+                  {discountable && (
+                    <div className="space-y-1.5 rounded-md border border-amber-100 bg-amber-50/60 px-2 py-1.5">
+                      <div className="flex items-center justify-between gap-1">
+                        <p className="text-[11px] text-gray-500 tabular-nums">
+                          List{' '}
+                          <span className={item.unitPrice < item.sellingPrice ? 'line-through' : ''}>
+                            KES {item.sellingPrice.toLocaleString()}
+                          </span>
+                        </p>
+                        <p className="text-[10px] text-amber-800/80 tabular-nums shrink-0">
+                          Min KES {floor.toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <label className="text-[11px] text-gray-600 shrink-0">Sell at</label>
+                        <input
+                          type="number"
+                          min={floor}
+                          max={item.sellingPrice}
+                          step="1"
+                          value={priceDraft}
+                          onChange={(e) => setPriceDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                          onBlur={() => commitItemPriceDraft(item.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.currentTarget.blur()
+                            }
+                          }}
+                          className="flex-1 min-w-0 border border-gray-200 rounded-md px-2 py-1 text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-1">
+                        <p className="text-[10px] text-gray-500 tabular-nums">
+                          {currentDisc > 0
+                            ? `−KES ${currentDisc.toLocaleString()} (${discPct}%)`
+                            : 'No discount'}
+                        </p>
+                        {item.unitPrice < item.sellingPrice && (
+                          <button
+                            type="button"
+                            onClick={() => resetItemPrice(item.id)}
+                            className="text-[10px] text-blue-600 hover:underline shrink-0"
+                          >
+                            Reset
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex gap-1">
+                        {[5, 10, 15].map((pct) => (
+                          <button
+                            key={pct}
+                            type="button"
+                            onClick={() => applyDiscountPercent(item.id, pct)}
+                            className="flex-1 text-[10px] py-1 rounded border border-gray-200 text-gray-600 hover:bg-white hover:border-amber-300 hover:text-amber-800 transition-colors"
+                          >
+                            −{pct}%
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1">
                       <button type="button" onClick={() => setQty(item.id, -1)} className="p-1 rounded-md hover:bg-gray-100 border border-gray-200"><Minus size={12} /></button>
@@ -913,98 +991,6 @@ export default function POSPage() {
           </button>
         </div>
       </aside>
-
-      {/* Discount editor (staff-only — opened via hidden eye icon) */}
-      <Dialog.Root open={!!discountEditItem} onOpenChange={(v) => !v && setDiscountEditId(null)}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40" />
-          <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm z-50 focus:outline-none">
-            {discountEditItem && (() => {
-              const item = discountEditItem
-              const floor = effectiveLowestPrice(item, minMarkupPercent)
-              const maxDisc = discountPerUnit(item.sellingPrice, floor)
-              const currentDisc = discountPerUnit(item.sellingPrice, item.unitPrice)
-              const ruleFloor = item.costPrice > 0 ? item.costPrice * (minMarkupPercent / 100) : item.sellingPrice
-              return (
-                <>
-                  <div className="flex items-center justify-between mb-4">
-                    <Dialog.Title className="text-lg font-semibold pr-4">Adjust price</Dialog.Title>
-                    <Dialog.Close asChild>
-                      <button type="button" className="text-gray-500 hover:text-gray-600 p-1 rounded-md"><X size={18} /></button>
-                    </Dialog.Close>
-                  </div>
-                  <p className="text-sm font-medium text-gray-800 mb-1">{item.name}</p>
-                  <p className="text-xs text-gray-500 mb-4">List price: KES {item.sellingPrice.toLocaleString()}</p>
-
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 mb-4 space-y-1.5">
-                    <p className="text-xs font-semibold text-amber-900 flex items-center gap-1.5">
-                      <AlertCircle size={13} className="shrink-0" />
-                      Pricing rules
-                    </p>
-                    <ul className="text-xs text-amber-900/85 space-y-1 list-disc list-inside leading-relaxed">
-                      <li>Minimum sell price: <strong>KES {floor.toLocaleString()}</strong> (cost × {minMarkupPercent}% = {Math.round(ruleFloor).toLocaleString()})</li>
-                      <li>Cannot discount below this floor — price will be clamped automatically</li>
-                      {item.lowestPrice != null && item.lowestPrice > ruleFloor && (
-                        <li>Product has a manual floor of KES {item.lowestPrice.toLocaleString()}</li>
-                      )}
-                      <li>Max discount on this item: <strong>KES {maxDisc.toLocaleString()}</strong></li>
-                    </ul>
-                  </div>
-
-                  <div className="space-y-3">
-                    <div className="space-y-1.5">
-                      <label className="block text-xs font-medium text-gray-700">Sell at (per unit)</label>
-                      <input
-                        type="number"
-                        min={floor}
-                        max={item.sellingPrice}
-                        step="1"
-                        value={item.unitPrice}
-                        onChange={(e) => setItemPrice(item.id, e.target.value)}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                      <p className="text-xs text-gray-400">
-                        Discount: KES {currentDisc.toLocaleString()}
-                        {item.sellingPrice > 0 && ` (${Math.round((currentDisc / item.sellingPrice) * 100)}%)`}
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      {[5, 10, 15].map((pct) => (
-                        <button
-                          key={pct}
-                          type="button"
-                          onClick={() => applyDiscountPercent(item.id, pct)}
-                          className="flex-1 text-xs py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-amber-50 hover:border-amber-300 hover:text-amber-800 transition-colors"
-                        >
-                          −{pct}%
-                        </button>
-                      ))}
-                    </div>
-                    {item.unitPrice < item.sellingPrice && (
-                      <button
-                        type="button"
-                        onClick={() => resetItemPrice(item.id)}
-                        className="w-full text-xs text-blue-600 hover:underline py-1"
-                      >
-                        Reset to list price
-                      </button>
-                    )}
-                  </div>
-
-                  <Dialog.Close asChild>
-                    <button
-                      type="button"
-                      className="mt-5 w-full py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors"
-                    >
-                      Done
-                    </button>
-                  </Dialog.Close>
-                </>
-              )
-            })()}
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
 
       {/* Receipt modal */}
       <Dialog.Root open={!!receipt} onOpenChange={(v) => !v && setReceipt(null)}>
