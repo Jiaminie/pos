@@ -60,3 +60,16 @@ export function clampUnitPrice(
   const max = product.sellingPrice
   return Math.min(max, Math.max(min, unitPrice))
 }
+
+/** POS cart line — enforce floor only; allow markup above list for this sale. */
+export function clampCartUnitPrice(
+  product: PriceFields,
+  price: number,
+  minMarkupPercent: number = DEFAULT_MIN_MARKUP_PERCENT,
+): number {
+  const min = effectiveLowestPrice(product, minMarkupPercent)
+  return Math.max(min, price)
+}
+
+/** @deprecated Use clampCartUnitPrice — cart prices must not mutate catalog list price. */
+export const clampSavedSellingPrice = clampCartUnitPrice

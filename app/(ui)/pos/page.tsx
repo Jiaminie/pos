@@ -10,10 +10,10 @@ import { AlertCircle, ChevronDown, FileText, ImageOff, Minus, Plus, Printer, Sea
 import { toast } from 'sonner'
 import { createMany as createManyTransactions } from '@/lib/db/transactions'
 import { drain } from '@/lib/db/syncQueue'
-import { drain as drainProductSync, push as pushProductSync } from '@/lib/db/productSyncQueue'
+import { drain as drainProductSync } from '@/lib/db/productSyncQueue'
 import { create as createSale, type Sale } from '@/lib/db/sales'
 import { push as pushSale, drain as drainSales } from '@/lib/db/salesSyncQueue'
-import { getAll as getProducts, upsertMany as upsertProducts } from '@/lib/db/products'
+import { getAll as getProducts } from '@/lib/db/products'
 import { getAll as getCategories } from '@/lib/db/categories'
 import { normalizeQuery } from '@/lib/normalize'
 import { getAll as getTransactions } from '@/lib/db/transactions'
@@ -37,7 +37,7 @@ import {
 } from '@/lib/device-ui'
 import { INCIDENT_REASON_LABELS } from '@/lib/types'
 import { fetchSettings, type PosLookupMode } from '@/lib/settings'
-import { canDiscount, clampUnitPrice, DEFAULT_MIN_MARKUP_PERCENT, discountPerUnit, effectiveLowestPrice } from '@/lib/pricing'
+import { canDiscount, clampCartUnitPrice, clampUnitPrice, DEFAULT_MIN_MARKUP_PERCENT, discountPerUnit, effectiveLowestPrice } from '@/lib/pricing'
 import { applyCartDiscount, maxCartDiscount } from '@/lib/pricing-cart'
 import { getCachedAuthUser } from '@/lib/auth'
 import { getMyBranchId } from '@/lib/branch'
@@ -83,7 +83,6 @@ export default function POSPage() {
   const [minMarkupPercent, setMinMarkupPercent] = useState(DEFAULT_MIN_MARKUP_PERCENT)
   const [posLookupMode, setPosLookupMode] = useState<PosLookupMode>('catalog')
   const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({})
-  const [savingPriceId, setSavingPriceId] = useState<string | null>(null)
   const [cartDiscountInput, setCartDiscountInput] = useState('')
   const [cartDiscountApplied, setCartDiscountApplied] = useState(0)
   const [deviceUiMode, setDeviceUiMode] = useState<DeviceUiMode>('desktop')
@@ -374,16 +373,25 @@ export default function POSPage() {
     return priceDrafts[item.id] ?? String(item.unitPrice)
   }
 
+  function resolvedItemUnitPrice(item: CartItem): number {
+    const draft = priceDrafts[item.id]
+    if (draft !== undefined) {
+      const val = parseFloat(draft)
+      if (!isNaN(val)) return clampCartUnitPrice(item, val, minMarkupPercent)
+    }
+    return item.unitPrice
+  }
+
   function canSaveItemPrice(item: CartItem): boolean {
     const val = parseFloat(priceDraftValue(item))
     if (isNaN(val)) return false
-    const clamped = clampUnitPrice(item, val, minMarkupPercent)
-    return clamped !== item.unitPrice || clamped !== item.sellingPrice
+    const clamped = clampCartUnitPrice(item, val, minMarkupPercent)
+    return clamped !== item.unitPrice
   }
 
-  async function saveItemPrice(id: string) {
+  function saveItemPrice(id: string) {
     const item = cart.find((i) => i.id === id)
-    if (!item || !canDiscount(item, minMarkupPercent)) return
+    if (!item) return
 
     const draft = priceDraftValue(item)
     const val = parseFloat(draft)
@@ -393,41 +401,21 @@ export default function POSPage() {
     }
 
     const min = effectiveLowestPrice(item, minMarkupPercent)
-    const clamped = clampUnitPrice(item, val, minMarkupPercent)
+    const clamped = clampCartUnitPrice(item, val, minMarkupPercent)
     if (val < min) {
       toast.warning(`Min price for ${item.name} is KES ${min.toLocaleString()}`)
     }
 
-    if (clamped === item.unitPrice && clamped === item.sellingPrice) {
+    if (clamped === item.unitPrice) {
       clearPriceDraft(id)
       return
     }
 
-    setSavingPriceId(id)
-    try {
-      const { qty: _qty, unitPrice: _unitPrice, ...productFields } = item
-      const updatedProduct: Product = { ...productFields, sellingPrice: clamped }
-
-      setCart((prev) =>
-        prev.map((i) =>
-          i.id === id ? { ...i, unitPrice: clamped, sellingPrice: clamped } : i,
-        ),
-      )
-      clearPriceDraft(id)
-
-      if (clamped !== item.sellingPrice) {
-        await upsertProducts([updatedProduct])
-        setProducts((prev) => prev.map((p) => (p.id === id ? updatedProduct : p)))
-        await pushProductSync({ id, method: 'PATCH', body: { sellingPrice: clamped } })
-        void drainProductSync()
-      }
-
-      toast.success(`Price saved at KES ${clamped.toLocaleString()}`)
-    } catch {
-      toast.error('Could not save price')
-    } finally {
-      setSavingPriceId(null)
-    }
+    setCart((prev) =>
+      prev.map((i) => (i.id === id ? { ...i, unitPrice: clamped } : i)),
+    )
+    clearPriceDraft(id)
+    toast.success(`Line price set to KES ${clamped.toLocaleString()} (this sale only)`)
   }
 
   function applyDiscountPercent(id: string, percent: number) {
@@ -470,10 +458,11 @@ export default function POSPage() {
     setCartDiscountInput(String(Math.round(applied)))
   }
 
-  const subtotal = cart.reduce((sum, i) => sum + i.unitPrice * i.qty, 0)
+  const subtotal = cart.reduce((sum, i) => sum + resolvedItemUnitPrice(i) * i.qty, 0)
   const listTotal = cart.reduce((sum, i) => sum + i.sellingPrice * i.qty, 0)
-  const lineDiscountTotal = listTotal - subtotal
-  const totalDiscount = lineDiscountTotal
+  const lineAdjustment = listTotal - subtotal
+  const totalDiscount = Math.max(0, lineAdjustment)
+  const totalMarkup = Math.max(0, -lineAdjustment)
   const maxCartDisc = cart.length > 0
     ? maxCartDiscount(cart.map((item) => ({
         sellingPrice: item.sellingPrice,
@@ -493,6 +482,13 @@ export default function POSPage() {
       return
     }
 
+    const pendingPrice = cart.some((item) => canSaveItemPrice(item))
+    if (pendingPrice) {
+      toast.warning('Apply pending line prices before checkout')
+      setChecking(false)
+      return
+    }
+
     const saleId = crypto.randomUUID()
     const now = new Date().toISOString()
     const deviceId = getDeviceId()
@@ -505,6 +501,11 @@ export default function POSPage() {
       originalUnitPrice: item.sellingPrice,
       lineDiscountAmount: discountPerUnit(item.sellingPrice, item.unitPrice) * item.qty,
     }))
+
+    const lineDiscountTotal = cart.reduce(
+      (sum, item) => sum + discountPerUnit(item.sellingPrice, item.unitPrice) * item.qty,
+      0,
+    )
 
     const sale: Sale = {
       id: saleId,
@@ -633,6 +634,11 @@ export default function POSPage() {
       })
       printPDF(doc)
       toast.success('Sent to printer', { description: `Ref: ${quoteRef}` })
+      setCart([])
+      setCartDiscountInput('')
+      setCartDiscountApplied(0)
+      setPriceDrafts({})
+      localStorage.removeItem('pos_cart')
       setQuoteOpen(false)
       setQuoteForm({ customerName: '', customerPhone: '', note: '' })
     } finally {
@@ -928,20 +934,15 @@ export default function POSPage() {
             cart.map((item) => {
               const discountable = canDiscount(item, minMarkupPercent)
               const floor = discountable ? effectiveLowestPrice(item, minMarkupPercent) : 0
-              const currentDisc = discountPerUnit(item.sellingPrice, item.unitPrice)
-              const discPct = item.sellingPrice > 0 ? Math.round((currentDisc / item.sellingPrice) * 100) : 0
               const priceDraft = priceDraftValue(item)
               const priceSavePending = canSaveItemPrice(item)
+              const displayUnitPrice = resolvedItemUnitPrice(item)
+              const displayDisc = discountPerUnit(item.sellingPrice, displayUnitPrice)
               return (
                 <div key={item.id} className="rounded-lg border border-gray-200 bg-white p-2.5 space-y-2">
                   <div className="flex items-start gap-1">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{item.name}</p>
-                      {!discountable && (
-                        <p className="text-xs text-gray-500 tabular-nums">
-                          KES {item.unitPrice.toLocaleString()}
-                        </p>
-                      )}
                     </div>
                     <button
                       type="button"
@@ -957,65 +958,68 @@ export default function POSPage() {
                     </button>
                   </div>
 
-                  {discountable && (
-                    <div className="space-y-1.5 rounded-md border border-amber-100 bg-amber-50/60 px-2 py-1.5">
-                      <div className="flex items-center justify-between gap-1">
-                        <p className="text-[11px] text-gray-500 tabular-nums">
-                          List{' '}
-                          <span className={item.unitPrice < item.sellingPrice ? 'line-through' : ''}>
-                            KES {item.sellingPrice.toLocaleString()}
-                          </span>
-                        </p>
+                  <div className="space-y-1.5 rounded-md border border-amber-100 bg-amber-50/60 px-2 py-1.5">
+                    <div className="flex items-center justify-between gap-1">
+                      <p className="text-[11px] text-gray-500 tabular-nums">
+                        List{' '}
+                        <span className={displayUnitPrice !== item.sellingPrice ? 'line-through' : ''}>
+                          KES {item.sellingPrice.toLocaleString()}
+                        </span>
+                      </p>
+                      {discountable && (
                         <p className="text-[10px] text-amber-800/80 tabular-nums shrink-0">
                           Min KES {floor.toLocaleString()}
                         </p>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <label className="text-[11px] text-gray-600 shrink-0">Sell at</label>
-                        <input
-                          type="number"
-                          min={floor}
-                          max={item.sellingPrice}
-                          step="1"
-                          value={priceDraft}
-                          onChange={(e) => setPriceDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault()
-                              void saveItemPrice(item.id)
-                            }
-                          }}
-                          className="flex-1 min-w-0 border border-gray-200 rounded-md px-2 py-1 text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
-                        />
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <label className="text-[11px] text-gray-600 shrink-0">Sell at</label>
+                      <input
+                        type="number"
+                        min={discountable ? floor : 0}
+                        step="1"
+                        value={priceDraft}
+                        onChange={(e) => setPriceDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            saveItemPrice(item.id)
+                          }
+                        }}
+                        className="flex-1 min-w-0 border border-gray-200 rounded-md px-2 py-1 text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => saveItemPrice(item.id)}
+                        disabled={!priceSavePending}
+                        className={`shrink-0 rounded-md px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-40 ${
+                          priceSavePending
+                            ? 'bg-blue-600 text-white hover:bg-blue-700'
+                            : 'bg-gray-100 text-gray-400'
+                        }`}
+                      >
+                        Apply
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between gap-1">
+                      <p className="text-[10px] text-gray-500 tabular-nums">
+                        {displayDisc > 0
+                          ? `−KES ${displayDisc.toLocaleString()} (${item.sellingPrice > 0 ? Math.round((displayDisc / item.sellingPrice) * 100) : 0}%)`
+                          : displayUnitPrice > item.sellingPrice
+                            ? `+KES ${(displayUnitPrice - item.sellingPrice).toLocaleString()} above list`
+                            : 'At list price'}
+                      </p>
+                      {displayUnitPrice !== item.sellingPrice && (
                         <button
                           type="button"
-                          onClick={() => void saveItemPrice(item.id)}
-                          disabled={!priceSavePending || savingPriceId === item.id}
-                          className={`shrink-0 rounded-md px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-40 ${
-                            priceSavePending
-                              ? 'bg-blue-600 text-white hover:bg-blue-700'
-                              : 'bg-gray-100 text-gray-400'
-                          }`}
+                          onClick={() => resetItemPrice(item.id)}
+                          className="text-[10px] text-blue-600 hover:underline shrink-0"
                         >
-                          {savingPriceId === item.id ? '…' : 'Save'}
+                          Reset
                         </button>
-                      </div>
-                      <div className="flex items-center justify-between gap-1">
-                        <p className="text-[10px] text-gray-500 tabular-nums">
-                          {currentDisc > 0
-                            ? `−KES ${currentDisc.toLocaleString()} (${discPct}%)`
-                            : 'No discount'}
-                        </p>
-                        {item.unitPrice < item.sellingPrice && (
-                          <button
-                            type="button"
-                            onClick={() => resetItemPrice(item.id)}
-                            className="text-[10px] text-blue-600 hover:underline shrink-0"
-                          >
-                            Reset
-                          </button>
-                        )}
-                      </div>
+                      )}
+                    </div>
+                    {discountable && (
                       <div className={`flex gap-1 ${touchMode ? 'gap-2' : ''}`}>
                         {[5, 10, 15].map((pct) => (
                           <button
@@ -1032,8 +1036,8 @@ export default function POSPage() {
                           </button>
                         ))}
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
 
                   <div className="flex items-center justify-between gap-2">
                     <div className={`flex items-center ${touchMode ? 'gap-2' : 'gap-1'}`}>
@@ -1045,8 +1049,8 @@ export default function POSPage() {
                         <Plus size={touchMode ? 18 : 12} />
                       </button>
                     </div>
-                    <span className="text-sm font-semibold tabular-nums">
-                      KES {(item.unitPrice * item.qty).toLocaleString()}
+                    <span className={`text-sm font-semibold tabular-nums ${priceSavePending ? 'text-blue-600' : ''}`}>
+                      KES {(displayUnitPrice * item.qty).toLocaleString()}
                     </span>
                   </div>
                 </div>
@@ -1056,16 +1060,24 @@ export default function POSPage() {
         </div>
 
         <div className="px-5 py-4 border-t border-gray-200 space-y-3">
-          {totalDiscount > 0 && (
+          {(totalDiscount > 0 || totalMarkup > 0) && (
             <>
               <div className="flex justify-between text-xs text-gray-500">
                 <span>List total</span>
-                <span className="line-through">KES {listTotal.toLocaleString()}</span>
+                <span className={totalDiscount > 0 ? 'line-through' : ''}>KES {listTotal.toLocaleString()}</span>
               </div>
-              <div className="flex justify-between text-xs text-amber-600">
-                <span>Discount</span>
-                <span>−KES {totalDiscount.toLocaleString()}</span>
-              </div>
+              {totalDiscount > 0 && (
+                <div className="flex justify-between text-xs text-amber-600">
+                  <span>Line discounts</span>
+                  <span>−KES {totalDiscount.toLocaleString()}</span>
+                </div>
+              )}
+              {totalMarkup > 0 && (
+                <div className="flex justify-between text-xs text-blue-600">
+                  <span>Line markups</span>
+                  <span>+KES {totalMarkup.toLocaleString()}</span>
+                </div>
+              )}
             </>
           )}
           {cart.length > 0 && maxCartDisc > 0 && (
