@@ -38,6 +38,7 @@ export async function POST() {
       primaryColor:    dbSettings?.primaryColor   ?? '#2563eb',
       currency:        dbSettings?.currency       ?? 'KES',
       footerText:      dbSettings?.footerText     ?? 'Thank you for your business.',
+      paymentDetails:  dbSettings?.paymentDetails ?? '',
       minMarkupPercent: Number(dbSettings?.minMarkupPercent ?? 150),
       posLookupMode:   parsePosLookupMode(dbSettings?.posLookupMode),
       receiptFormat:   parseReceiptFormat(dbSettings?.receiptFormat),
