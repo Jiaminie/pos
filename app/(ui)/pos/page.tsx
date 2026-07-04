@@ -11,10 +11,10 @@ import { AlertCircle, ChevronDown, FileText, ImageOff, Printer, Search, Shopping
 import { toast } from 'sonner'
 import { createMany as createManyTransactions } from '@/lib/db/transactions'
 import { drain } from '@/lib/db/syncQueue'
-import { drain as drainProductSync } from '@/lib/db/productSyncQueue'
+import { drain as drainProductSync, push as pushProductSync } from '@/lib/db/productSyncQueue'
 import { create as createSale, type Sale } from '@/lib/db/sales'
 import { push as pushSale, drain as drainSales } from '@/lib/db/salesSyncQueue'
-import { getAll as getProducts } from '@/lib/db/products'
+import { getAll as getProducts, upsertMany as upsertProducts } from '@/lib/db/products'
 import { getAll as getCategories } from '@/lib/db/categories'
 import { normalizeQuery } from '@/lib/normalize'
 import { getAll as getTransactions } from '@/lib/db/transactions'
@@ -39,7 +39,7 @@ import { INCIDENT_REASON_LABELS } from '@/lib/types'
 import { fetchSettings, type PosLookupMode } from '@/lib/settings'
 import { canDiscount, clampCartUnitPrice, clampUnitPrice, DEFAULT_MIN_MARKUP_PERCENT, discountPerUnit, effectiveLowestPrice } from '@/lib/pricing'
 import { applyCartDiscount, maxCartDiscount } from '@/lib/pricing-cart'
-import { getCachedAuthUser } from '@/lib/auth'
+import { getCachedAuthUser, hasPermission, type AuthUser } from '@/lib/auth'
 import { getMyBranchId } from '@/lib/branch'
 import type { Product, ProductCategory, InventoryTransaction, IncidentReason, SaleLine } from '@/lib/types'
 
@@ -154,6 +154,7 @@ export default function POSPage() {
   const [cartDiscountApplied, setCartDiscountApplied] = useState(0)
   const [deviceUiMode, setDeviceUiMode] = useState<DeviceUiMode>('desktop')
   const [cartOpen, setCartOpen] = useState(false)
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null)
   const alertedIds = useRef<Set<string>>(new Set())
   const skipCartPersist = useRef(true)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -186,7 +187,15 @@ export default function POSPage() {
 
   useEffect(() => {
     setDeviceUiMode(getDeviceUiMode())
+    setAuthUser(getCachedAuthUser())
   }, [])
+
+  // Catalog price edits are permission-gated (see /api/products/[id]). Selling
+  // price needs catalog.price.selling; cost & floor are owner-only. Gate the
+  // "save to product" affordance so we never write locally then fail to sync.
+  const canEditSelling =
+    !!authUser && hasPermission(authUser, 'catalog.product.manage') && hasPermission(authUser, 'catalog.price.selling')
+  const canEditCostFloor = !!authUser && hasPermission(authUser, 'catalog.price.cost_and_floor')
 
   const touchMode = isTouchOptimized(deviceUiMode)
   const mobilePos = deviceUiMode === 'mobile'
@@ -501,6 +510,77 @@ export default function POSPage() {
 
     setCart((prev) => prev.map((i) => (i.id === id ? { ...i, lowestPrice: val } : i)))
     toast.success(`Floor set to KES ${val.toLocaleString()} — you can now discount this item`)
+  }
+
+  /** A "blank" catalog entry: no selling, buying, or floor price on record.
+   *  For these the cart edits are promoted to the product itself. */
+  function isUnpriced(item: CartItem): boolean {
+    return item.sellingPrice <= 0 && item.costPrice <= 0 && (item.lowestPrice == null || item.lowestPrice <= 0)
+  }
+
+  /** Persist the cart-entered selling/buying price back to the catalog product
+   *  (branch-wide — prices are org-scoped) via the offline-safe sync queue. */
+  async function saveItemToProduct(id: string) {
+    const item = cart.find((i) => i.id === id)
+    if (!item) return
+    if (!canEditSelling) {
+      toast.error('You do not have permission to set catalog prices')
+      return
+    }
+
+    const selling = parseFloat(priceDraftValue(item))
+    if (isNaN(selling) || selling <= 0) {
+      toast.error('Enter a selling price greater than 0')
+      return
+    }
+
+    const buyingRaw = costDraftValue(item)
+    const buying = parseFloat(buyingRaw)
+    const hasBuying = buyingRaw.trim() !== '' && !isNaN(buying) && buying > 0
+    if (hasBuying && buying >= selling) {
+      toast.error('Buying price must be below the selling price')
+      return
+    }
+
+    const base = products.find((p) => p.id === id) ?? item
+    const nextCost = canEditCostFloor && hasBuying ? buying : base.costPrice
+    const nextLowest = canEditCostFloor && hasBuying ? buying : base.lowestPrice
+    const nextProduct: Product = {
+      ...base,
+      sellingPrice: selling,
+      costPrice: nextCost,
+      lowestPrice: nextLowest,
+    }
+
+    // Local-first: update the cache, the in-memory catalog, and the live line.
+    await upsertProducts([nextProduct])
+    setProducts((prev) => prev.map((p) => (p.id === id ? nextProduct : p)))
+    setCart((prev) =>
+      prev.map((i) =>
+        i.id === id
+          ? { ...i, sellingPrice: selling, costPrice: nextCost, lowestPrice: nextLowest, unitPrice: selling }
+          : i,
+      ),
+    )
+    clearPriceDraft(id)
+    setCostDrafts((prev) => {
+      if (!(id in prev)) return prev
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+
+    // Queue the server write with only the fields this user may change.
+    const body: Record<string, unknown> = { sellingPrice: selling }
+    if (canEditCostFloor && hasBuying) {
+      body.costPrice = buying
+      body.lowestPrice = buying
+    }
+    await pushProductSync({ id, method: 'PATCH', body })
+    drainProductSync().catch(() => {})
+
+    const costNote = hasBuying && !canEditCostFloor ? ' — buying price needs owner rights' : ''
+    toast.success(`Prices saved to ${item.name}, updated in the catalog${costNote}`)
   }
 
   function priceDraftValue(item: CartItem): string {
@@ -1132,7 +1212,7 @@ export default function POSPage() {
                             className="min-w-0 w-full border border-gray-200 rounded-md px-2 py-1.5 text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
                           />
                         </div>
-                        {!discountable && (
+                        {!discountable && item.sellingPrice > 0 && (
                           <p className="text-[10px] text-gray-500">
                             No minimum on record — set the buying price to discount below KES {item.sellingPrice.toLocaleString()}.
                           </p>
@@ -1142,7 +1222,7 @@ export default function POSPage() {
 
                     <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
                       <label htmlFor={`cart-price-${item.id}`} className="text-[11px] font-medium text-gray-600">
-                        Sell at
+                        {isUnpriced(item) ? 'Selling price' : 'Sell at'}
                       </label>
                       <input
                         id={`cart-price-${item.id}`}
@@ -1191,6 +1271,21 @@ export default function POSPage() {
                         </button>
                       )}
                     </div>
+
+                    {isUnpriced(item) && canEditSelling && (
+                      <div className="pt-2 border-t border-amber-200/70 space-y-1.5">
+                        <p className="text-[10px] leading-snug text-amber-800/80">
+                          No catalog price on record. Saving writes the selling{canEditCostFloor ? ' & buying' : ''} price to the product — applies across all branches.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => void saveItemToProduct(item.id)}
+                          className="w-full rounded-md bg-amber-600 text-white text-[11px] font-medium py-1.5 hover:bg-amber-700 transition-colors"
+                        >
+                          Save price to product
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <div className="border-t border-gray-100 bg-gray-50/60 px-3 py-3 space-y-2.5">
