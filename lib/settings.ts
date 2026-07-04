@@ -83,6 +83,8 @@ export interface PDFSettings {
   receiptFormat: ReceiptFormat
   /** Heading printed on the sales receipt, e.g. "RECEIPT", "SALES RECEIPT". */
   receiptTitle: string
+  /** Paybill, Till, M-Pesa, or bank details printed on receipts & quotations. */
+  paymentDetails: string
 }
 
 export const DEFAULT_SETTINGS: PDFSettings = {
@@ -96,6 +98,7 @@ export const DEFAULT_SETTINGS: PDFSettings = {
   posLookupMode: 'catalog',
   receiptFormat: 'a4',
   receiptTitle: 'RECEIPT',
+  paymentDetails: '',
 }
 
 const KEY = 'pos-pdf-settings'
@@ -113,6 +116,7 @@ export function loadSettings(): PDFSettings {
       posLookupMode: parsePosLookupMode(parsed.posLookupMode),
       receiptFormat: parseReceiptFormat(parsed.receiptFormat),
       receiptTitle: typeof parsed.receiptTitle === 'string' ? parsed.receiptTitle : DEFAULT_SETTINGS.receiptTitle,
+      paymentDetails: typeof parsed.paymentDetails === 'string' ? parsed.paymentDetails : DEFAULT_SETTINGS.paymentDetails,
     }
   } catch {
     return DEFAULT_SETTINGS
@@ -142,6 +146,7 @@ export async function fetchSettings(): Promise<PDFSettings> {
       posLookupMode: parsePosLookupMode(data.posLookupMode),
       receiptFormat: parseReceiptFormat(data.receiptFormat),
       receiptTitle: data.receiptTitle ?? DEFAULT_SETTINGS.receiptTitle,
+      paymentDetails: data.paymentDetails ?? DEFAULT_SETTINGS.paymentDetails,
     }
     cacheSettings(s)
     return s

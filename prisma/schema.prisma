@@ -317,6 +317,7 @@ model StoreSettings {
   posLookupMode    String   @default("catalog") @map("pos_lookup_mode")
   receiptFormat    String   @default("a4") @map("receipt_format")
   receiptTitle     String   @default("RECEIPT") @map("receipt_title")
+  paymentDetails   String   @default("") @map("payment_details")
   resendApiKey     String   @default("") @map("resend_api_key")
   reportEmail      String   @default("") @map("report_email")
   fromEmail        String   @default("") @map("from_email")

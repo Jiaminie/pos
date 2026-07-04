@@ -71,7 +71,7 @@ export function CartQtyControl({
   }
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-1.5 w-full min-w-0">
       <div className={`flex items-center ${touchMode ? 'gap-2' : 'gap-1'}`}>
         <button
           type="button"

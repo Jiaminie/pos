@@ -137,6 +137,49 @@ function addFooters(doc: jsPDF, settings: PDFSettings) {
   }
 }
 
+/** Payment details block for A4 receipts and quotations. Returns y after the block. */
+function drawPaymentDetailsA4(doc: jsPDF, settings: PDFSettings, y: number, primary: RGB): number {
+  const text = settings.paymentDetails?.trim()
+  if (!text) return y
+
+  y = drawSectionHeader(doc, 'Payment details', y, primary)
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(9)
+  doc.setTextColor(...DARK)
+  ;(doc.splitTextToSize(text, CONTENT - 10) as string[]).forEach((line) => {
+    doc.text(line, MARGIN + 5, y)
+    y += 5
+  })
+  return y + 4
+}
+
+/** Payment details block for thermal receipts and quotations. Mutates y in place. */
+function drawPaymentDetailsThermal(
+  doc: jsPDF,
+  settings: PDFSettings,
+  y: number,
+  m: number,
+  width: number,
+  rule: () => void,
+): number {
+  const text = settings.paymentDetails?.trim()
+  if (!text) return y
+
+  rule()
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(7.5)
+  doc.setTextColor(...DARK)
+  doc.text('Payment details', m, y)
+  y += 3.6
+  doc.setFont('helvetica', 'normal')
+  doc.setTextColor(...GRAY_TXT)
+  ;(doc.splitTextToSize(text, width - 2 * m) as string[]).forEach((line) => {
+    doc.text(line, m, y)
+    y += 3.6
+  })
+  return y + 0.5
+}
+
 // ─── Quotation ────────────────────────────────────────────────────────────────
 
 export interface QuotationItem {
@@ -245,6 +288,7 @@ export function generateQuotationPDF(data: QuotationData): jsPDF {
   const tableEnd = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY
 
   // ── Note / Terms
+  let afterContentY = tableEnd + 10
   if (data.note) {
     const noteY = tableEnd + 10
     doc.setFillColor(...GRAY_BG)
@@ -256,7 +300,10 @@ export function generateQuotationPDF(data: QuotationData): jsPDF {
     doc.setFont('helvetica', 'normal')
     doc.setTextColor(...DARK)
     doc.text(data.note, MARGIN + 5, noteY + 11)
+    afterContentY = noteY + 20
   }
+
+  drawPaymentDetailsA4(doc, settings, afterContentY, primary)
 
   addFooters(doc, settings)
   return doc
@@ -403,6 +450,8 @@ function drawThermal(doc: jsPDF, data: ThermalDoc, settings: PDFSettings, width:
     y += 0.5
   }
 
+  y = drawPaymentDetailsThermal(doc, settings, y, m, width, rule)
+
   // ── Footer
   rule()
   doc.setFont('helvetica', 'normal')
@@ -508,6 +557,9 @@ export function generateReceiptPDF(data: ReceiptData): jsPDF {
     columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
     margin: { left: MARGIN, right: MARGIN },
   })
+
+  const tableEnd = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY
+  drawPaymentDetailsA4(doc, settings, tableEnd + 10, primary)
 
   addFooters(doc, settings)
   return doc

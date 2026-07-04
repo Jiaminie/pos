@@ -710,6 +710,21 @@ export default function SettingsPage() {
                   </div>
 
                   <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-gray-700">Payment details</label>
+                    <textarea
+                      value={settings.paymentDetails}
+                      onChange={(e) => set('paymentDetails', e.target.value)}
+                      placeholder={'Paybill: 123456\nAccount: SHOP NAME\nTill: 123456'}
+                      maxLength={500}
+                      rows={4}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y min-h-[5.5rem]"
+                    />
+                    <p className="text-xs text-gray-400">
+                      Printed on receipts and quotations — e.g. M-Pesa Paybill, Till number, or bank account details. Leave blank to hide.
+                    </p>
+                  </div>
+
+                  <div className="space-y-1.5">
                     <label className="block text-xs font-medium text-gray-700">Accent colour</label>
                     <div className="flex flex-wrap gap-2">
                       {COLORS.map(({ label, value }) => (
@@ -756,6 +771,13 @@ export default function SettingsPage() {
                       <div className="flex justify-between"><span>Item B x2</span><span>2,480</span></div>
                       <div className="border-t border-dashed border-gray-300" />
                       <div className="flex justify-between font-bold text-gray-900"><span>TOTAL</span><span>{settings.currency} 3,480</span></div>
+                      {settings.paymentDetails.trim() && (
+                        <>
+                          <div className="border-t border-dashed border-gray-300" />
+                          <p className="text-[10px] font-semibold text-gray-700">Payment details</p>
+                          <p className="text-[10px] text-gray-500 whitespace-pre-line leading-snug">{settings.paymentDetails.trim()}</p>
+                        </>
+                      )}
                       <p className="text-center text-gray-400 pt-1 truncate">{settings.footerText || 'Thank you'}</p>
                     </div>
                   </div>

@@ -495,15 +495,6 @@ export default function POSPage() {
     toast.success(`Line price set to KES ${clamped.toLocaleString()} (this sale only)`)
   }
 
-  function applyDiscountPercent(id: string, percent: number) {
-    clearPriceDraft(id)
-    setCart((prev) => prev.map((item) => {
-      if (item.id !== id) return item
-      const target = item.sellingPrice * (1 - percent / 100)
-      return { ...item, unitPrice: clampUnitPrice(item, target, minMarkupPercent) }
-    }))
-  }
-
   function resetItemPrice(id: string) {
     clearPriceDraft(id)
     setCart((prev) => prev.map((item) =>
@@ -1024,7 +1015,7 @@ export default function POSPage() {
               const displayUnitPrice = resolvedItemUnitPrice(item)
               const displayDisc = discountPerUnit(item.sellingPrice, displayUnitPrice)
               return (
-                <div key={item.id} className="rounded-lg border border-gray-200 bg-white p-2.5 space-y-2">
+                <div key={item.id} className="rounded-lg border border-gray-200 bg-white p-2.5 space-y-2 min-w-0 overflow-hidden">
                   <div className="flex items-start gap-1">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{item.name}</p>
@@ -1104,27 +1095,9 @@ export default function POSPage() {
                         </button>
                       )}
                     </div>
-                    {discountable && (
-                      <div className={`flex gap-1 ${touchMode ? 'gap-2' : ''}`}>
-                        {[5, 10, 15].map((pct) => (
-                          <button
-                            key={pct}
-                            type="button"
-                            onClick={() => applyDiscountPercent(item.id, pct)}
-                            className={`flex-1 rounded border border-gray-200 text-gray-600 transition-colors ${
-                              touchMode
-                                ? 'min-h-10 text-sm active:bg-white active:border-amber-300 active:text-amber-800 active:scale-95'
-                                : 'text-[10px] py-1 hover:bg-white hover:border-amber-300 hover:text-amber-800'
-                            }`}
-                          >
-                            −{pct}%
-                          </button>
-                        ))}
-                      </div>
-                    )}
                   </div>
 
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="space-y-1.5">
                     <CartQtyControl
                       qty={item.qty}
                       deviceUiMode={deviceUiMode}
@@ -1133,9 +1106,11 @@ export default function POSPage() {
                       onDelta={(delta) => setQty(item.id, delta)}
                       onSetQty={(qty) => setItemQty(item.id, qty)}
                     />
-                    <span className={`text-sm font-semibold tabular-nums shrink-0 ${priceSavePending ? 'text-blue-600' : ''}`}>
-                      KES {(displayUnitPrice * item.qty).toLocaleString()}
-                    </span>
+                    <div className="flex justify-end">
+                      <span className={`text-sm font-semibold tabular-nums ${priceSavePending ? 'text-blue-600' : ''}`}>
+                        KES {(displayUnitPrice * item.qty).toLocaleString()}
+                      </span>
+                    </div>
                   </div>
                 </div>
               )
