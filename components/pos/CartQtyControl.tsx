@@ -96,10 +96,10 @@ export function CartQtyControl({
           onFocus={handleFocus}
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}
-          className={`text-center tabular-nums font-medium border border-gray-200 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 ${
+          className={`flex-1 min-w-0 text-center tabular-nums font-semibold border border-gray-200 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 ${
             touchMode
-              ? 'min-h-10 w-[3.25rem] text-base px-1.5 py-1 rounded-lg'
-              : 'w-14 text-sm px-1 py-1 rounded-md'
+              ? 'min-h-10 min-w-[3.5rem] max-w-[7rem] text-lg px-2 py-1 rounded-lg'
+              : 'min-w-[3.5rem] max-w-[6rem] text-base px-1.5 py-1 rounded-md'
           }`}
           aria-label="Quantity"
         />
