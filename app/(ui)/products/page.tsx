@@ -134,6 +134,15 @@ function ProductsPageContent() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(() => getCachedAuthUser())
   const showBarcodeField = barcodeSearchEnabled(posLookupMode)
   const canSetCostPrice = hasPermission(authUser, 'catalog.price.cost_and_floor')
+  const canSetSellingPrice = hasPermission(authUser, 'catalog.price.selling')
+  // The server requires this permission for every create/edit — without it the
+  // whole PATCH/POST 403s, so don't offer a modal that can't save anything.
+  const canManageProducts = hasPermission(authUser, 'catalog.product.manage')
+  // Creation (POST) requires sellingPrice unconditionally on the server, unlike
+  // edits (PATCH) where omitting a price field is a safe partial update. So
+  // creating a product needs both permissions, or the POST 400s and the queued
+  // sync item is dropped permanently, leaving an orphaned local-only product.
+  const canCreateProducts = canManageProducts && canSetSellingPrice
 
   async function refreshCatalogFromServer() {
     setRefreshing(true)
@@ -407,13 +416,18 @@ function ProductsPageContent() {
       name: input.name,
       sku: input.sku,
       specification: input.specification ?? null,
-      sellingPrice: input.sellingPrice,
       category: input.categoryName,
       brand: input.brand,
       imageUrl: input.imageUrl ?? null,
       ...(showBarcodeField ? { barcode: input.barcodeValue ?? null } : {}),
     }
-    // Cost/floor are owner-only — omit so the server skips that permission check.
+    // Price fields are permission-gated on the server: including a field the
+    // user can't set makes the server reject the ENTIRE request with 403, so a
+    // manager who can edit products (but not prices) would lose their name/
+    // category edits too. Only send each price when the user may change it.
+    if (canSetSellingPrice) {
+      body.sellingPrice = input.sellingPrice
+    }
     if (canSetCostPrice) {
       body.costPrice = input.costPrice
       body.lowestPrice = input.lowestPrice ?? null
@@ -484,9 +498,10 @@ function ProductsPageContent() {
           ...(showBarcodeField ? { barcode: barcodeValue } : {}),
           specification: form.specification || undefined,
           // unitId intentionally NOT updated — immutable after creation
-          sellingPrice,
-          costPrice,
-          lowestPrice,
+          // Only apply price changes the user is allowed to persist, so the
+          // optimistic row matches what the server accepts (no silent revert).
+          ...(canSetSellingPrice ? { sellingPrice } : {}),
+          ...(canSetCostPrice ? { costPrice, lowestPrice } : {}),
           categoryId,
           brand,
           ...(form.imageUrl ? { imageUrl: form.imageUrl } : {}),
@@ -729,14 +744,16 @@ function ProductsPageContent() {
           <p className="text-xs md:text-sm text-gray-500 mt-0.5">Catalog, pricing, and stock levels</p>
         </div>
         <div className="flex flex-col gap-2 w-full md:w-auto md:flex-row md:items-center">
-          <button
-            type="button"
-            onClick={openAdd}
-            className="md:hidden inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-3 rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors shadow-sm"
-          >
-            <Plus size={18} />
-            Add product
-          </button>
+          {canCreateProducts && (
+            <button
+              type="button"
+              onClick={openAdd}
+              className="md:hidden inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-3 rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors shadow-sm"
+            >
+              <Plus size={18} />
+              Add product
+            </button>
+          )}
           <div className="flex items-center gap-2">
             <button
               onClick={refreshCatalogFromServer}
@@ -748,23 +765,27 @@ function ProductsPageContent() {
               <span className="hidden sm:inline">{refreshing ? 'Syncing…' : 'Sync catalog'}</span>
               <span className="sm:hidden">{refreshing ? '…' : 'Sync'}</span>
             </button>
-            <button
-              onClick={() => setBulkOpen(true)}
-              className="inline-flex flex-1 md:flex-none items-center justify-center gap-1.5 border border-gray-300 text-gray-700 px-3 py-2.5 md:py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
-            >
-              <Upload size={16} />
-              <span className="hidden sm:inline">Bulk upload</span>
-              <span className="sm:hidden">Bulk</span>
-            </button>
-            <Dialog.Trigger asChild>
+            {canCreateProducts && (
               <button
-                onClick={openAdd}
-                className="hidden md:inline-flex items-center gap-1.5 bg-blue-600 text-white px-3.5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                onClick={() => setBulkOpen(true)}
+                className="inline-flex flex-1 md:flex-none items-center justify-center gap-1.5 border border-gray-300 text-gray-700 px-3 py-2.5 md:py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
               >
-                <Plus size={16} />
-                Add product
+                <Upload size={16} />
+                <span className="hidden sm:inline">Bulk upload</span>
+                <span className="sm:hidden">Bulk</span>
               </button>
-            </Dialog.Trigger>
+            )}
+            {canCreateProducts && (
+              <Dialog.Trigger asChild>
+                <button
+                  onClick={openAdd}
+                  className="hidden md:inline-flex items-center gap-1.5 bg-blue-600 text-white px-3.5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                >
+                  <Plus size={16} />
+                  Add product
+                </button>
+              </Dialog.Trigger>
+            )}
           </div>
         </div>
       </div>
@@ -891,24 +912,33 @@ function ProductsPageContent() {
                   <div className="space-y-1.5">
                     <Label.Root htmlFor="p-sell" className="text-sm font-medium text-gray-700">Selling price</Label.Root>
                     <input id="p-sell" required type="number" min="0" step="0.01" value={form.sellingPrice} onChange={field('sellingPrice')}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      disabled={!canSetSellingPrice}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed" />
                   </div>
                   <div className="space-y-1.5">
-                    <Label.Root htmlFor="p-cost" className="text-sm font-medium text-gray-700">Cost price</Label.Root>
+                    <Label.Root htmlFor="p-cost" className="text-sm font-medium text-gray-700">Buying price</Label.Root>
                     <input id="p-cost" required type="number" min="0" step="0.01" value={form.costPrice} onChange={field('costPrice')}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      disabled={!canSetCostPrice}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed" />
                   </div>
                 </div>
 
+                {!canSetSellingPrice && !canSetCostPrice && (
+                  <p className="text-xs text-amber-600 order-3">
+                    Prices are locked for your role — other changes will still be saved. Ask an owner to update prices.
+                  </p>
+                )}
+
                 <div className="space-y-1.5 order-3">
                   <Label.Root htmlFor="p-lowest" className="text-sm font-medium text-gray-700">
-                    Lowest price <span className="text-gray-400 font-normal">(optional stricter floor)</span>
+                    Lowest price <span className="text-gray-400 font-normal">(minimum you'll accept)</span>
                   </Label.Root>
                   <input id="p-lowest" type="number" min="0" step="0.01" value={form.lowestPrice} onChange={field('lowestPrice')}
-                    placeholder="Leave blank to use pricing rule from Settings"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    disabled={!canSetCostPrice}
+                    placeholder="Leave blank to use the markup rule from Settings"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed" />
                   <p className="text-xs text-gray-400">
-                    Discount floor defaults to cost × markup% (Settings). Set this only to enforce a higher minimum than the rule.
+                    The lowest you're willing to sell this for. Discounts are allowed all the way down to here — even below the buying price. Leave blank to fall back to the buying price × markup% rule (Settings).
                   </p>
                 </div>
 
@@ -1183,7 +1213,7 @@ function ProductsPageContent() {
               <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
                 <tr>
                   {[
-                    '', 'Name', 'Spec / Size', 'SKU', 'Brand', 'In stock', 'Sell', 'Lowest', 'Discount', 'Cost', 'Add stock', '',
+                    '', 'Name', 'Spec / Size', 'SKU', 'Brand', 'In stock', 'Sell', 'Lowest', 'Discount', 'Buying', 'Add stock', '',
                   ].map((label, i) => {
                     const alignRight = i >= 5 && i <= 10
                     return (
@@ -1295,9 +1325,11 @@ function ProductsPageContent() {
                       </div>
                     </td>
                     <td className="px-2 py-2.5">
-                      <button onClick={() => openEdit(p)} className="p-1.5 rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
-                        <Pencil size={14} />
-                      </button>
+                      {canManageProducts && (
+                        <button onClick={() => openEdit(p)} className="p-1.5 rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
+                          <Pencil size={14} />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 )})}
@@ -1327,9 +1359,11 @@ function ProductsPageContent() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
                         <h3 className="font-semibold text-gray-900 truncate">{p.name}</h3>
-                        <button onClick={() => openEdit(p)} className="p-1 -mr-1 text-gray-400 hover:text-blue-600">
-                          <Pencil size={16} />
-                        </button>
+                        {canManageProducts && (
+                          <button onClick={() => openEdit(p)} className="p-1 -mr-1 text-gray-400 hover:text-blue-600">
+                            <Pencil size={16} />
+                          </button>
+                        )}
                       </div>
                       <p className="text-xs text-gray-500 font-mono">{p.sku}</p>
                       <p className="text-xs text-gray-500 mt-0.5">{getProductBrand(p)}</p>

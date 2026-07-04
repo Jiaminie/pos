@@ -698,7 +698,7 @@ export default function StockCountPage() {
     if (canSetCostPrice && newItemForm.costPrice.trim()) {
       costPrice = parseFloat(newItemForm.costPrice)
       if (Number.isNaN(costPrice) || costPrice < 0) {
-        toast.error('Cost price is not a valid number')
+        toast.error('Buying price is not a valid number')
         return
       }
     }
@@ -900,7 +900,7 @@ export default function StockCountPage() {
           </label>
           {canSetCostPrice && (
             <label className="text-xs text-gray-500">
-              Cost price <span className="text-gray-400">(optional)</span>
+              Buying price <span className="text-gray-400">(optional)</span>
               <input
                 type="number"
                 inputMode="decimal"

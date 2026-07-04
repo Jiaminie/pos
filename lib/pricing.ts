@@ -1,4 +1,4 @@
-/** Minimum sell price as % of cost (150 = floor is 1.5× cost). */
+/** Minimum sell price as % of buying price (150 = floor is 1.5× buying price). */
 export const DEFAULT_MIN_MARKUP_PERCENT = 150
 
 type PriceFields = {
@@ -9,9 +9,12 @@ type PriceFields = {
 
 /**
  * Effective discount floor for a product.
- * - Rule floor: cost × (minMarkupPercent / 100)
- * - Manual lowestPrice can only raise the floor, never lower it
- * - Never above selling price (no discount if floor ≥ sell)
+ * - A manually-set lowestPrice IS the floor — it's the seller's own minimum and
+ *   wins outright, even below the buying price. This gives full control over how
+ *   low they're willing to go; discounts are computed from sell down to it.
+ * - When no manual floor is set, fall back to the markup rule:
+ *   buying price × (minMarkupPercent / 100).
+ * - Never above selling price (no discount if floor ≥ sell).
  */
 export function effectiveLowestPrice(
   product: PriceFields,
@@ -20,15 +23,15 @@ export function effectiveLowestPrice(
   const sell = product.sellingPrice
   if (sell <= 0) return 0
 
+  const manual = product.lowestPrice
+  if (manual != null) return Math.min(sell, Math.max(0, manual))
+
   const ruleFloor =
     product.costPrice > 0
       ? product.costPrice * (minMarkupPercent / 100)
       : sell
 
-  const manual = product.lowestPrice
-  const floor = manual != null ? Math.max(manual, ruleFloor) : ruleFloor
-
-  return Math.min(sell, Math.max(0, floor))
+  return Math.min(sell, Math.max(0, ruleFloor))
 }
 
 export function canDiscount(

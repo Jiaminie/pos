@@ -1,0 +1,1491 @@
+{
+  "v": 1,
+  "entries": {
+    ".claire/worktrees/agent-c-ui/app/(ui)/reports/page.tsx": {
+      "mtime_ms": 1780488606646.9675,
+      "symbols": []
+    },
+    ".claude/worktrees/agent-a-backend/app/api/cron/daily-report/route.ts": {
+      "mtime_ms": 1780488711286.961,
+      "symbols": [
+        "POST"
+      ]
+    },
+    ".claude/worktrees/agent-a-backend/app/api/products/categories/route.ts": {
+      "mtime_ms": 1780490892935.0781,
+      "symbols": [
+        "GET"
+      ]
+    },
+    ".claude/worktrees/agent-a-backend/app/api/products/route.ts": {
+      "mtime_ms": 1780494231245.7402,
+      "symbols": [
+        "GET",
+        "POST"
+      ]
+    },
+    ".claude/worktrees/agent-a-backend/app/api/sync/route.ts": {
+      "mtime_ms": 1780488631904.2073,
+      "symbols": [
+        "POST"
+      ]
+    },
+    ".claude/worktrees/agent-a-backend/app/api/transactions/route.ts": {
+      "mtime_ms": 1780494268329.3328,
+      "symbols": [
+        "GET",
+        "POST"
+      ]
+    },
+    ".claude/worktrees/agent-a-backend/app/api/upload/route.ts": {
+      "mtime_ms": 1780490904807.2139,
+      "symbols": [
+        "POST"
+      ]
+    },
+    ".claude/worktrees/agent-a-backend/app/layout.tsx": {
+      "mtime_ms": 1780488048895.468,
+      "symbols": [
+        "metadata"
+      ]
+    },
+    ".claude/worktrees/agent-a-backend/app/page.tsx": {
+      "mtime_ms": 1780488048895.468,
+      "symbols": []
+    },
+    ".claude/worktrees/agent-a-backend/lib/server/db.ts": {
+      "mtime_ms": 1780488603654.9392,
+      "symbols": [
+        "prisma"
+      ]
+    },
+    ".claude/worktrees/agent-a-backend/next-env.d.ts": {
+      "mtime_ms": 1780488662556.4983,
+      "symbols": []
+    },
+    ".claude/worktrees/agent-a-backend/next.config.ts": {
+      "mtime_ms": 1780488048895.468,
+      "symbols": []
+    },
+    ".claude/worktrees/agent-a-backend/prisma.config.ts": {
+      "mtime_ms": 1780488531455.254,
+      "symbols": []
+    },
+    ".claude/worktrees/agent-b-offline/app/layout.tsx": {
+      "mtime_ms": 1780488061697.6028,
+      "symbols": [
+        "metadata"
+      ]
+    },
+    ".claude/worktrees/agent-b-offline/app/page.tsx": {
+      "mtime_ms": 1780488061697.6028,
+      "symbols": []
+    },
+    ".claude/worktrees/agent-b-offline/lib/db/dexie.ts": {
+      "mtime_ms": 1780490871922.8376,
+      "symbols": [
+        "DbProduct",
+        "DbTransaction",
+        "DbSyncQueueItem",
+        "PosDatabase",
+        "db"
+      ]
+    },
+    ".claude/worktrees/agent-b-offline/lib/db/products.ts": {
+      "mtime_ms": 1780490876241.887,
+      "symbols": [
+        "getAll",
+        "getById",
+        "upsertMany",
+        "getByCategory"
+      ]
+    },
+    ".claude/worktrees/agent-b-offline/lib/db/syncQueue.ts": {
+      "mtime_ms": 1780488836103.246,
+      "symbols": [
+        "push",
+        "flush"
+      ]
+    },
+    ".claude/worktrees/agent-b-offline/lib/db/transactions.ts": {
+      "mtime_ms": 1780488831596.1975,
+      "symbols": [
+        "create",
+        "getUnsync",
+        "markSynced"
+      ]
+    },
+    ".claude/worktrees/agent-b-offline/lib/sync/engine.ts": {
+      "mtime_ms": 1780488886456.7908,
+      "symbols": [
+        "syncOnOpen",
+        "syncOnInterval",
+        "syncOnReconnect"
+      ]
+    },
+    ".claude/worktrees/agent-b-offline/lib/types.ts": {
+      "mtime_ms": 1780488695407.81,
+      "symbols": [
+        "TransactionType",
+        "Product",
+        "InventoryTransaction"
+      ]
+    },
+    ".claude/worktrees/agent-b-offline/next-env.d.ts": {
+      "mtime_ms": 1780488875875.6765,
+      "symbols": []
+    },
+    ".claude/worktrees/agent-b-offline/next.config.ts": {
+      "mtime_ms": 1780488930513.2673,
+      "symbols": []
+    },
+    ".claude/worktrees/agent-c-ui/app/(ui)/categories/page.tsx": {
+      "mtime_ms": 1780495073981.8418,
+      "symbols": []
+    },
+    ".claude/worktrees/agent-c-ui/app/(ui)/inventory/page.tsx": {
+      "mtime_ms": 1780495034440.2773,
+      "symbols": []
+    },
+    ".claude/worktrees/agent-c-ui/app/(ui)/layout.tsx": {
+      "mtime_ms": 1780494398948.4202,
+      "symbols": []
+    },
+    ".claude/worktrees/agent-c-ui/app/(ui)/pos/page.tsx": {
+      "mtime_ms": 1780494829000.2559,
+      "symbols": []
+    },
+    ".claude/worktrees/agent-c-ui/app/(ui)/products/page.tsx": {
+      "mtime_ms": 1780494998021.7573,
+      "symbols": []
+    },
+    ".claude/worktrees/agent-c-ui/app/(ui)/reports/page.tsx": {
+      "mtime_ms": 1780495432400.9534,
+      "symbols": []
+    },
+    ".claude/worktrees/agent-c-ui/app/layout.tsx": {
+      "mtime_ms": 1780494394307.346,
+      "symbols": [
+        "metadata"
+      ]
+    },
+    ".claude/worktrees/agent-c-ui/app/page.tsx": {
+      "mtime_ms": 1780488075370.7466,
+      "symbols": []
+    },
+    ".claude/worktrees/agent-c-ui/components/CategoryModal.tsx": {
+      "mtime_ms": 1780491056610.951,
+      "symbols": []
+    },
+    ".claude/worktrees/agent-c-ui/lib/db/categories.ts": {
+      "mtime_ms": 1780490459565.1196,
+      "symbols": [
+        "upsertMany",
+        "getAll"
+      ]
+    },
+    ".claude/worktrees/agent-c-ui/lib/db/idb.ts": {
+      "mtime_ms": 1780493913745.6677,
+      "symbols": [
+        "openDb"
+      ]
+    },
+    ".claude/worktrees/agent-c-ui/lib/db/products.ts": {
+      "mtime_ms": 1780490449941.0095,
+      "symbols": [
+        "upsertMany",
+        "getAll",
+        "getByCategory"
+      ]
+    },
+    ".claude/worktrees/agent-c-ui/lib/db/seed.ts": {
+      "mtime_ms": 1780493897960.4185,
+      "symbols": [
+        "CATEGORIES",
+        "PRODUCTS",
+        "seedIfEmpty"
+      ]
+    },
+    ".claude/worktrees/agent-c-ui/lib/db/syncQueue.ts": {
+      "mtime_ms": 1780489721549.0022,
+      "symbols": [
+        "push"
+      ]
+    },
+    ".claude/worktrees/agent-c-ui/lib/db/transactions.ts": {
+      "mtime_ms": 1780494465394.4443,
+      "symbols": [
+        "getAll",
+        "create"
+      ]
+    },
+    ".claude/worktrees/agent-c-ui/lib/types.ts": {
+      "mtime_ms": 1780490960457.8506,
+      "symbols": [
+        "ProductCategory",
+        "Product",
+        "TransactionType",
+        "InventoryTransaction"
+      ]
+    },
+    ".claude/worktrees/agent-c-ui/next-env.d.ts": {
+      "mtime_ms": 1780495585919.1387,
+      "symbols": []
+    },
+    ".claude/worktrees/agent-c-ui/next.config.ts": {
+      "mtime_ms": 1780488075370.7466,
+      "symbols": []
+    },
+    "app/(ui)/categories/page.tsx": {
+      "mtime_ms": 1781773184633.9963,
+      "symbols": []
+    },
+    "app/(ui)/dashboard/page.tsx": {
+      "mtime_ms": 1781770848285.2866,
+      "symbols": []
+    },
+    "app/(ui)/inventory/page.tsx": {
+      "mtime_ms": 1781460052059.7104,
+      "symbols": []
+    },
+    "app/(ui)/layout.tsx": {
+      "mtime_ms": 1783071786734.5452,
+      "symbols": []
+    },
+    "app/(ui)/pos/page.tsx": {
+      "mtime_ms": 1783151794491.544,
+      "symbols": []
+    },
+    "app/(ui)/products/page.tsx": {
+      "mtime_ms": 1782994890322.1538,
+      "symbols": []
+    },
+    "app/(ui)/reports/page.tsx": {
+      "mtime_ms": 1782812674056.631,
+      "symbols": []
+    },
+    "app/(ui)/settings/page.tsx": {
+      "mtime_ms": 1783071776463.4023,
+      "symbols": []
+    },
+    "app/(ui)/stock-count/page.tsx": {
+      "mtime_ms": 1782993337408.0798,
+      "symbols": []
+    },
+    "app/(ui)/transfers/page.tsx": {
+      "mtime_ms": 1782059825394.7727,
+      "symbols": []
+    },
+    "app/api/alerts/low-stock/route.ts": {
+      "mtime_ms": 1782810518641.297,
+      "symbols": [
+        "POST"
+      ]
+    },
+    "app/api/alerts/offline-backlog/route.ts": {
+      "mtime_ms": 1782820041628.5515,
+      "symbols": [
+        "POST"
+      ]
+    },
+    "app/api/auth/login/route.ts": {
+      "mtime_ms": 1782994885738.098,
+      "symbols": [
+        "POST"
+      ]
+    },
+    "app/api/auth/logout/route.ts": {
+      "mtime_ms": 1782810356699.8782,
+      "symbols": [
+        "POST"
+      ]
+    },
+    "app/api/auth/me/route.ts": {
+      "mtime_ms": 1782812540947.1023,
+      "symbols": [
+        "GET"
+      ]
+    },
+    "app/api/auth/switch-branch/route.ts": {
+      "mtime_ms": 1782812600334.7844,
+      "symbols": [
+        "POST"
+      ]
+    },
+    "app/api/branches/[id]/route.ts": {
+      "mtime_ms": 1782993337419.0798,
+      "symbols": [
+        "PATCH",
+        "DELETE"
+      ]
+    },
+    "app/api/branches/route.ts": {
+      "mtime_ms": 1782993337419.0798,
+      "symbols": [
+        "GET",
+        "POST"
+      ]
+    },
+    "app/api/cron/daily-report/route.ts": {
+      "mtime_ms": 1782978807014.6084,
+      "symbols": [
+        "POST"
+      ]
+    },
+    "app/api/incidents/route.ts": {
+      "mtime_ms": 1782812618640.9946,
+      "symbols": [
+        "GET",
+        "POST"
+      ]
+    },
+    "app/api/permissions/route.ts": {
+      "mtime_ms": 1782819905197.1282,
+      "symbols": [
+        "GET",
+        "PUT"
+      ]
+    },
+    "app/api/products/[id]/route.ts": {
+      "mtime_ms": 1782994201277.654,
+      "symbols": [
+        "PATCH",
+        "DELETE"
+      ]
+    },
+    "app/api/products/brands/route.ts": {
+      "mtime_ms": 1782810515382.2485,
+      "symbols": [
+        "GET"
+      ]
+    },
+    "app/api/products/categories/route.ts": {
+      "mtime_ms": 1782810499198.0066,
+      "symbols": [
+        "GET"
+      ]
+    },
+    "app/api/products/import/backup/route.ts": {
+      "mtime_ms": 1782812632661.1555,
+      "symbols": [
+        "POST"
+      ]
+    },
+    "app/api/products/import/batch/route.ts": {
+      "mtime_ms": 1782812632786.157,
+      "symbols": [
+        "POST"
+      ]
+    },
+    "app/api/products/import/commit/route.ts": {
+      "mtime_ms": 1782812635020.1826,
+      "symbols": [
+        "POST"
+      ]
+    },
+    "app/api/products/import/preview/route.ts": {
+      "mtime_ms": 1782812635232.185,
+      "symbols": [
+        "POST"
+      ]
+    },
+    "app/api/products/route.ts": {
+      "mtime_ms": 1782994199113.6309,
+      "symbols": [
+        "GET",
+        "POST"
+      ]
+    },
+    "app/api/reports/discounts/route.ts": {
+      "mtime_ms": 1782812610031.8958,
+      "symbols": [
+        "GET"
+      ]
+    },
+    "app/api/sales/[id]/route.ts": {
+      "mtime_ms": 1782819876742.838,
+      "symbols": [
+        "DELETE"
+      ]
+    },
+    "app/api/sales/route.ts": {
+      "mtime_ms": 1782819838127.444,
+      "symbols": [
+        "POST"
+      ]
+    },
+    "app/api/settings/route.ts": {
+      "mtime_ms": 1782820873641.6804,
+      "symbols": [
+        "GET",
+        "PATCH"
+      ]
+    },
+    "app/api/stock-count/extract/route.ts": {
+      "mtime_ms": 1782978807015.6084,
+      "symbols": [
+        "GET",
+        "POST"
+      ]
+    },
+    "app/api/stock-count/upload-signature/route.ts": {
+      "mtime_ms": 1782978807015.6084,
+      "symbols": [
+        "POST"
+      ]
+    },
+    "app/api/stock-count/uploads/complete/route.ts": {
+      "mtime_ms": 1782978807015.6084,
+      "symbols": [
+        "POST"
+      ]
+    },
+    "app/api/sync/route.ts": {
+      "mtime_ms": 1782978807016.6084,
+      "symbols": [
+        "POST"
+      ]
+    },
+    "app/api/transactions/route.ts": {
+      "mtime_ms": 1782978807016.6084,
+      "symbols": [
+        "GET",
+        "POST"
+      ]
+    },
+    "app/api/transfers/[id]/route.ts": {
+      "mtime_ms": 1782812579873.5493,
+      "symbols": [
+        "PATCH"
+      ]
+    },
+    "app/api/transfers/route.ts": {
+      "mtime_ms": 1782812578535.534,
+      "symbols": [
+        "GET",
+        "POST"
+      ]
+    },
+    "app/api/units/route.ts": {
+      "mtime_ms": 1782812621027.022,
+      "symbols": [
+        "GET",
+        "POST"
+      ]
+    },
+    "app/api/upload/route.ts": {
+      "mtime_ms": 1782978807017.6084,
+      "symbols": [
+        "POST"
+      ]
+    },
+    "app/api/users/[id]/route.ts": {
+      "mtime_ms": 1782993337420.0798,
+      "symbols": [
+        "PATCH",
+        "DELETE"
+      ]
+    },
+    "app/api/users/route.ts": {
+      "mtime_ms": 1782823096079.356,
+      "symbols": [
+        "GET",
+        "POST"
+      ]
+    },
+    "app/generated/prisma/browser.ts": {
+      "mtime_ms": 1780493389828.4128,
+      "symbols": [
+        "Product"
+      ]
+    },
+    "app/generated/prisma/client.ts": {
+      "mtime_ms": 1780493389828.4128,
+      "symbols": [
+        "PrismaClient",
+        "Product"
+      ]
+    },
+    "app/generated/prisma/commonInputTypes.ts": {
+      "mtime_ms": 1780493389828.4128,
+      "symbols": [
+        "StringFilter",
+        "StringNullableFilter",
+        "DateTimeFilter",
+        "SortOrderInput",
+        "StringWithAggregatesFilter",
+        "StringNullableWithAggregatesFilter",
+        "DateTimeWithAggregatesFilter",
+        "NestedStringFilter",
+        "NestedStringNullableFilter",
+        "NestedDateTimeFilter",
+        "NestedStringWithAggregatesFilter",
+        "NestedIntFilter",
+        "NestedStringNullableWithAggregatesFilter",
+        "NestedIntNullableFilter",
+        "NestedDateTimeWithAggregatesFilter"
+      ]
+    },
+    "app/generated/prisma/enums.ts": {
+      "mtime_ms": 1780493389828.4128,
+      "symbols": []
+    },
+    "app/generated/prisma/internal/class.ts": {
+      "mtime_ms": 1780493389828.4128,
+      "symbols": [
+        "LogOptions",
+        "PrismaClientConstructor",
+        "PrismaClient",
+        "getPrismaClientClass"
+      ]
+    },
+    "app/generated/prisma/internal/prismaNamespace.ts": {
+      "mtime_ms": 1780493389828.4128,
+      "symbols": [
+        "DMMF",
+        "PrismaPromise",
+        "PrismaClientKnownRequestError",
+        "PrismaClientUnknownRequestError",
+        "PrismaClientRustPanicError",
+        "PrismaClientInitializationError",
+        "PrismaClientValidationError",
+        "sql",
+        "empty",
+        "join",
+        "raw",
+        "Sql",
+        "Decimal",
+        "DecimalJsLike",
+        "Extension",
+        "getExtensionContext",
+        "Args",
+        "Payload",
+        "Result",
+        "Exact",
+        "PrismaVersion",
+        "prismaVersion",
+        "Bytes",
+        "JsonObject",
+        "JsonArray",
+        "JsonValue",
+        "InputJsonObject",
+        "InputJsonArray",
+        "InputJsonValue",
+        "NullTypes",
+        "DbNull",
+        "JsonNull",
+        "AnyNull",
+        "Enumerable",
+        "Subset",
+        "SelectSubset",
+        "SubsetIntersection",
+        "XOR",
+        "UnEnumerate",
+        "Either"
+      ]
+    },
+    "app/generated/prisma/internal/prismaNamespaceBrowser.ts": {
+      "mtime_ms": 1780493389828.4128,
+      "symbols": [
+        "Decimal",
+        "NullTypes",
+        "DbNull",
+        "JsonNull",
+        "AnyNull",
+        "ModelName",
+        "TransactionIsolationLevel",
+        "ProductScalarFieldEnum",
+        "SortOrder",
+        "QueryMode",
+        "NullsOrder"
+      ]
+    },
+    "app/generated/prisma/models.ts": {
+      "mtime_ms": 1780493389828.4128,
+      "symbols": []
+    },
+    "app/generated/prisma/models/Product.ts": {
+      "mtime_ms": 1780493389828.4128,
+      "symbols": [
+        "ProductModel",
+        "AggregateProduct",
+        "ProductMinAggregateOutputType",
+        "ProductMaxAggregateOutputType",
+        "ProductCountAggregateOutputType",
+        "ProductMinAggregateInputType",
+        "ProductMaxAggregateInputType",
+        "ProductCountAggregateInputType",
+        "ProductAggregateArgs",
+        "GetProductAggregateType",
+        "ProductGroupByArgs",
+        "ProductGroupByOutputType",
+        "GetProductGroupByPayload",
+        "ProductWhereInput",
+        "ProductOrderByWithRelationInput",
+        "ProductWhereUniqueInput",
+        "ProductOrderByWithAggregationInput",
+        "ProductScalarWhereWithAggregatesInput",
+        "ProductCreateInput",
+        "ProductUncheckedCreateInput",
+        "ProductUpdateInput",
+        "ProductUncheckedUpdateInput",
+        "ProductCreateManyInput",
+        "ProductUpdateManyMutationInput",
+        "ProductUncheckedUpdateManyInput",
+        "ProductCountOrderByAggregateInput",
+        "ProductMaxOrderByAggregateInput",
+        "ProductMinOrderByAggregateInput",
+        "StringFieldUpdateOperationsInput",
+        "NullableStringFieldUpdateOperationsInput",
+        "DateTimeFieldUpdateOperationsInput",
+        "ProductSelect",
+        "ProductSelectCreateManyAndReturn",
+        "ProductSelectUpdateManyAndReturn",
+        "ProductSelectScalar",
+        "ProductOmit",
+        "ProductGetPayload",
+        "ProductCountArgs",
+        "ProductDelegate",
+        "Prisma__ProductClient"
+      ]
+    },
+    "app/layout.tsx": {
+      "mtime_ms": 1783071715999.5608,
+      "symbols": [
+        "metadata"
+      ]
+    },
+    "app/lib/types.ts": {
+      "mtime_ms": 1780488217327.2407,
+      "symbols": [
+        "TransactionType",
+        "Product",
+        "InventoryTransaction"
+      ]
+    },
+    "app/page.tsx": {
+      "mtime_ms": 1780498278219.5627,
+      "symbols": []
+    },
+    "app/sw-register.tsx": {
+      "mtime_ms": 1780550998817.8262,
+      "symbols": []
+    },
+    "components/BranchSetup.tsx": {
+      "mtime_ms": 1783071884896.8838,
+      "symbols": [
+        "BranchSetup"
+      ]
+    },
+    "components/BrandModal.tsx": {
+      "mtime_ms": 1781773220862.437,
+      "symbols": []
+    },
+    "components/CategoryModal.tsx": {
+      "mtime_ms": 1780498165624.9814,
+      "symbols": []
+    },
+    "components/PinLogin.tsx": {
+      "mtime_ms": 1782810403699.58,
+      "symbols": [
+        "PinLogin"
+      ]
+    },
+    "components/pos/BrandPicker.tsx": {
+      "mtime_ms": 1781772463260.1611,
+      "symbols": [
+        "BrandPicker"
+      ]
+    },
+    "components/pos/CartQtyControl.tsx": {
+      "mtime_ms": 1783151809694.6555,
+      "symbols": [
+        "CartQtyControl"
+      ]
+    },
+    "components/pos/CategoryPicker.tsx": {
+      "mtime_ms": 1781772461887.1443,
+      "symbols": [
+        "CategoryPicker"
+      ]
+    },
+    "components/pos/QtyEntryDialog.tsx": {
+      "mtime_ms": 1783151764991.3271,
+      "symbols": [
+        "QtyEntryDialog"
+      ]
+    },
+    "components/pos/QtyNumpad.tsx": {
+      "mtime_ms": 1783151761285.3,
+      "symbols": [
+        "QtyNumpad"
+      ]
+    },
+    "components/products/BulkUploadWizard.tsx": {
+      "mtime_ms": 1781774912792.9858,
+      "symbols": [
+        "BulkUploadWizard"
+      ]
+    },
+    "components/products/CatalogSyncOverlay.tsx": {
+      "mtime_ms": 1781460052057.7102,
+      "symbols": [
+        "CatalogSyncOverlay"
+      ]
+    },
+    "components/products/ProductImageField.tsx": {
+      "mtime_ms": 1781702094044.3079,
+      "symbols": [
+        "ProductImageField"
+      ]
+    },
+    "components/products/WebcamCapture.tsx": {
+      "mtime_ms": 1781704938038.5752,
+      "symbols": [
+        "WebcamCapture"
+      ]
+    },
+    "components/settings/PermissionsSection.tsx": {
+      "mtime_ms": 1782994902185.2988,
+      "symbols": [
+        "PermissionsSection"
+      ]
+    },
+    "components/settings/TeamSection.tsx": {
+      "mtime_ms": 1782993337420.0798,
+      "symbols": [
+        "TeamSection"
+      ]
+    },
+    "lib/auth.ts": {
+      "mtime_ms": 1782994934847.6978,
+      "symbols": [
+        "PermissionKey",
+        "AuthUser",
+        "cacheAuthUser",
+        "getCachedAuthUser",
+        "clearCachedAuthUser",
+        "fetchMe",
+        "login",
+        "logout",
+        "canManageTeam",
+        "canViewReports",
+        "hasPermission"
+      ]
+    },
+    "lib/branch.ts": {
+      "mtime_ms": 1782059099569.3337,
+      "symbols": [
+        "getMyBranchId",
+        "setMyBranchId",
+        "clearMyBranchId",
+        "getMyOrgId",
+        "setMyOrgId"
+      ]
+    },
+    "lib/brands.ts": {
+      "mtime_ms": 1782284520149.413,
+      "symbols": [
+        "inferBrand",
+        "normalizeBrand",
+        "getProductBrand",
+        "getBrandOptions"
+      ]
+    },
+    "lib/camera.ts": {
+      "mtime_ms": 1781702536400.405,
+      "symbols": [
+        "isRearCameraLabel",
+        "isFrontCameraLabel",
+        "listVideoInputs",
+        "primeCameraPermission",
+        "pickRearCameraId",
+        "pickFrontCameraId",
+        "openCameraStream",
+        "openPreferredRearCamera"
+      ]
+    },
+    "lib/cart-qty.ts": {
+      "mtime_ms": 1783151759440.2864,
+      "symbols": [
+        "QTY_STEP_PRESETS",
+        "parseCartQty",
+        "commitCartQty"
+      ]
+    },
+    "lib/dates.ts": {
+      "mtime_ms": 1781704421493.521,
+      "symbols": [
+        "AddedRange",
+        "ADDED_RANGES",
+        "addedRangeStart",
+        "addedRangeEnd",
+        "isInAddedRange"
+      ]
+    },
+    "lib/db/branches.ts": {
+      "mtime_ms": 1782059126300.453,
+      "symbols": [
+        "getAll",
+        "getById",
+        "getPrimary",
+        "upsertMany",
+        "replaceAll"
+      ]
+    },
+    "lib/db/categories.ts": {
+      "mtime_ms": 1781460052055.7102,
+      "symbols": [
+        "upsertMany",
+        "clearAll",
+        "replaceAll",
+        "getAll"
+      ]
+    },
+    "lib/db/idb.ts": {
+      "mtime_ms": 1782994189311.5256,
+      "symbols": [
+        "openDb"
+      ]
+    },
+    "lib/db/incidents.ts": {
+      "mtime_ms": 1781770702052.4412,
+      "symbols": [
+        "getAll",
+        "create",
+        "createMany",
+        "push",
+        "pushMany",
+        "drain"
+      ]
+    },
+    "lib/db/organizations.ts": {
+      "mtime_ms": 1782059120364.4265,
+      "symbols": [
+        "getAll",
+        "upsertMany",
+        "replaceAll"
+      ]
+    },
+    "lib/db/products.ts": {
+      "mtime_ms": 1781773112466.1184,
+      "symbols": [
+        "upsertMany",
+        "clearAll",
+        "replaceAll",
+        "getAll",
+        "getByCategory",
+        "getByBrand"
+      ]
+    },
+    "lib/db/productSyncQueue.ts": {
+      "mtime_ms": 1782994187375.505,
+      "symbols": [
+        "ProductSyncItem",
+        "push",
+        "drain"
+      ]
+    },
+    "lib/db/sales.ts": {
+      "mtime_ms": 1782820016344.262,
+      "symbols": [
+        "Sale",
+        "create",
+        "getAll"
+      ]
+    },
+    "lib/db/salesSyncQueue.ts": {
+      "mtime_ms": 1782820032308.438,
+      "symbols": [
+        "BACKLOG_WARN_COUNT",
+        "BACKLOG_WARN_VALUE",
+        "push",
+        "backlog",
+        "drain"
+      ]
+    },
+    "lib/db/seed.ts": {
+      "mtime_ms": 1782286330585.8198,
+      "symbols": [
+        "syncFromServer",
+        "forceSyncFromServer",
+        "replaceCatalogFromServer",
+        "seedIfEmpty"
+      ]
+    },
+    "lib/db/sync-progress.ts": {
+      "mtime_ms": 1781460052061.7104,
+      "symbols": [
+        "CatalogSyncPhase",
+        "CatalogSyncProgress",
+        "SYNC_TIPS",
+        "initialSyncProgress"
+      ]
+    },
+    "lib/db/syncQueue.ts": {
+      "mtime_ms": 1782978807018.6084,
+      "symbols": [
+        "push",
+        "pushMany",
+        "drain"
+      ]
+    },
+    "lib/db/transactions.ts": {
+      "mtime_ms": 1782978807018.6084,
+      "symbols": [
+        "getAll",
+        "clearAll",
+        "create",
+        "upsertMany",
+        "createMany",
+        "removeMany"
+      ]
+    },
+    "lib/db/transfers.ts": {
+      "mtime_ms": 1782059134038.4875,
+      "symbols": [
+        "getAll",
+        "getIncoming",
+        "getOutgoing",
+        "upsert",
+        "upsertMany",
+        "updateStatus"
+      ]
+    },
+    "lib/db/units.ts": {
+      "mtime_ms": 1782055132074.6313,
+      "symbols": [
+        "getAll",
+        "upsertMany",
+        "replaceAll",
+        "getByCode"
+      ]
+    },
+    "lib/device-ui.ts": {
+      "mtime_ms": 1783077335309.9202,
+      "symbols": [
+        "DeviceUiMode",
+        "DEVICE_UI_MODES",
+        "parseDeviceUiMode",
+        "getDeviceUiMode",
+        "setDeviceUiMode",
+        "isTouchOptimized",
+        "posDialogContentClass",
+        "posDialogBodyClass",
+        "posActionBtnClass",
+        "posQtyBtnClass",
+        "posProductGridClass",
+        "posProductImageClass",
+        "posProductCardClass"
+      ]
+    },
+    "lib/device.ts": {
+      "mtime_ms": 1780540906383.442,
+      "symbols": [
+        "getDeviceId"
+      ]
+    },
+    "lib/image.ts": {
+      "mtime_ms": 1781523607928.4714,
+      "symbols": [
+        "compressProductImage"
+      ]
+    },
+    "lib/import/backup.ts": {
+      "mtime_ms": 1781774866013.4185,
+      "symbols": [
+        "CatalogBackupManifest",
+        "CatalogBackupResult",
+        "createCatalogBackup"
+      ]
+    },
+    "lib/import/categories.ts": {
+      "mtime_ms": 1781245998723.164,
+      "symbols": [
+        "inferCategory",
+        "resolveCategory"
+      ]
+    },
+    "lib/import/commit.ts": {
+      "mtime_ms": 1782286367089.263,
+      "symbols": [
+        "BULK_IMPORT_DEVICE_ID",
+        "SkuIdMap",
+        "loadExistingSkuMap",
+        "commitImportBatch",
+        "commitImport"
+      ]
+    },
+    "lib/import/constants.ts": {
+      "mtime_ms": 1781460052058.7102,
+      "symbols": [
+        "IMPORT_BATCH_SIZE"
+      ]
+    },
+    "lib/import/logger.ts": {
+      "mtime_ms": 1781460052065.7104,
+      "symbols": [
+        "ImportLogEntry",
+        "importLog"
+      ]
+    },
+    "lib/import/parse.ts": {
+      "mtime_ms": 1782284520157.413,
+      "symbols": [
+        "parsePrice",
+        "parseSpreadsheetRows",
+        "parseWorkbookBuffer",
+        "parseCsvText",
+        "parseImportFile"
+      ]
+    },
+    "lib/import/preview.ts": {
+      "mtime_ms": 1782284520150.413,
+      "symbols": [
+        "buildImportPreview"
+      ]
+    },
+    "lib/import/types.ts": {
+      "mtime_ms": 1782284520154.413,
+      "symbols": [
+        "ImportColumnKey",
+        "DEFAULT_STOCK_PRICES_MAPPING",
+        "RawImportRow",
+        "ImportPreviewStatus",
+        "ImportPreviewRow",
+        "ImportPreviewSummary",
+        "ImportPreviewResult",
+        "ImportCommitOptions",
+        "ImportCommitResult"
+      ]
+    },
+    "lib/normalize.ts": {
+      "mtime_ms": 1781703385235.9534,
+      "symbols": [
+        "normalizeQuery",
+        "skuFromName",
+        "uniqueSku",
+        "cleanProductName"
+      ]
+    },
+    "lib/pdf.ts": {
+      "mtime_ms": 1782820171352.1309,
+      "symbols": [
+        "printPDF",
+        "QuotationItem",
+        "QuotationData",
+        "generateQuotationPDF",
+        "ReceiptItem",
+        "ReceiptData",
+        "generateReceiptPDF",
+        "COBReportRow",
+        "MissedSaleRow",
+        "ABCSummaryRow",
+        "SlowMoverRow",
+        "ABCAnalysis",
+        "COBReportData",
+        "generateCOBReportPDF"
+      ]
+    },
+    "lib/permissions.ts": {
+      "mtime_ms": 1782819884415.9163,
+      "symbols": [
+        "PERMISSION_GROUPS",
+        "PermissionGroup",
+        "PermissionScope",
+        "PERMISSION_KEYS",
+        "PermissionKey",
+        "PermissionMeta",
+        "PERMISSION_CATALOG",
+        "TOGGLABLE_PERMISSIONS",
+        "OWNER_ONLY_PERMISSIONS",
+        "isPermissionKey",
+        "isOwnerOnlyPermission",
+        "getPermissionMeta"
+      ]
+    },
+    "lib/pricing-cart.ts": {
+      "mtime_ms": 1782810336025.5693,
+      "symbols": [
+        "maxCartDiscount",
+        "applyCartDiscount"
+      ]
+    },
+    "lib/pricing.ts": {
+      "mtime_ms": 1783081773444.578,
+      "symbols": [
+        "DEFAULT_MIN_MARKUP_PERCENT",
+        "effectiveLowestPrice",
+        "canDiscount",
+        "discountPerUnit",
+        "maxDiscountPerUnit",
+        "clampUnitPrice",
+        "clampCartUnitPrice",
+        "clampSavedSellingPrice"
+      ]
+    },
+    "lib/product-search.ts": {
+      "mtime_ms": 1782284520153.413,
+      "symbols": [
+        "normalizeBarcode",
+        "barcodeSearchEnabled",
+        "findProductByExactBarcode",
+        "matchesProductSearch"
+      ]
+    },
+    "lib/server/alerts.ts": {
+      "mtime_ms": 1782819790741.9607,
+      "symbols": [
+        "alertSaleVoided",
+        "alertHighDiscount",
+        "alertOfflineBacklog"
+      ]
+    },
+    "lib/server/audit.ts": {
+      "mtime_ms": 1782993337420.0798,
+      "symbols": [
+        "AuditAction",
+        "AuditInput",
+        "logAudit",
+        "recentVoidCount"
+      ]
+    },
+    "lib/server/auth/guard.ts": {
+      "mtime_ms": 1782978807019.6084,
+      "symbols": [
+        "AuthUser",
+        "jsonError",
+        "requireUser",
+        "isAuthUser",
+        "branchFilter",
+        "assertBranchAccess",
+        "canAccessBranch",
+        "requirePermission",
+        "requireUserWithPermission",
+        "canManageUsers"
+      ]
+    },
+    "lib/server/auth/lockout.ts": {
+      "mtime_ms": 1782819932626.408,
+      "symbols": [
+        "isLockedOut",
+        "recordFailedAttempt",
+        "clearAttempts"
+      ]
+    },
+    "lib/server/auth/permissions.ts": {
+      "mtime_ms": 1782994881882.0508,
+      "symbols": [
+        "seedRolePermissions",
+        "getEffectivePermissions",
+        "hasPermission",
+        "getPermissionsMatrix",
+        "updatePermissionGrants"
+      ]
+    },
+    "lib/server/auth/pin.ts": {
+      "mtime_ms": 1782810326437.426,
+      "symbols": [
+        "hashPin",
+        "verifyPin",
+        "validatePinFormat"
+      ]
+    },
+    "lib/server/auth/session.ts": {
+      "mtime_ms": 1782810326437.426,
+      "symbols": [
+        "SessionPayload",
+        "createSession",
+        "readSession",
+        "clearSession",
+        "updateSessionBranch"
+      ]
+    },
+    "lib/server/auth/transactionPermissions.ts": {
+      "mtime_ms": 1782978807019.6084,
+      "symbols": [
+        "ServerTransactionType",
+        "PERMISSION_BY_TRANSACTION_TYPE",
+        "getTransactionPermission",
+        "SyncItemStatus",
+        "classifySyncItem",
+        "resolveTransactionTypePermissions"
+      ]
+    },
+    "lib/server/cloudinary.ts": {
+      "mtime_ms": 1782978807019.6084,
+      "symbols": [
+        "configureCloudinary",
+        "cloudinaryEnvReady",
+        "CLOUDINARY_ENV_VARS",
+        "missingCloudinaryEnvVars"
+      ]
+    },
+    "lib/server/db.ts": {
+      "mtime_ms": 1780496574921.2952,
+      "symbols": [
+        "prisma"
+      ]
+    },
+    "lib/server/sales.ts": {
+      "mtime_ms": 1782819815216.2104,
+      "symbols": [
+        "SaleLineInput",
+        "SaleInput",
+        "validateAndBuildSale",
+        "createSaleRecord"
+      ]
+    },
+    "lib/server/stock-count/branch.ts": {
+      "mtime_ms": 1782978807019.6084,
+      "symbols": [
+        "resolveStockCountBranchId"
+      ]
+    },
+    "lib/server/stock-count/cloudinary.ts": {
+      "mtime_ms": 1782978807019.6084,
+      "symbols": [
+        "STOCK_COUNT_FOLDER",
+        "isValidStockCountImageUrl",
+        "createStockCountUploadSignature"
+      ]
+    },
+    "lib/server/stock-count/concurrency.ts": {
+      "mtime_ms": 1782978807020.6084,
+      "symbols": [
+        "mapWithConcurrency"
+      ]
+    },
+    "lib/server/stock-count/extract.ts": {
+      "mtime_ms": 1782978807020.6084,
+      "symbols": [
+        "anthropicConfigured",
+        "extractStockCountRows"
+      ]
+    },
+    "lib/server/stock-count/rateLimit.ts": {
+      "mtime_ms": 1782978807020.6084,
+      "symbols": [
+        "checkExtractRateLimit"
+      ]
+    },
+    "lib/server/stockAccumulation.ts": {
+      "mtime_ms": 1782978807020.6084,
+      "symbols": [
+        "ServerTransactionType",
+        "StockGroupByRow",
+        "applyServerStockDelta",
+        "buildStockByProductFromGroupBy"
+      ]
+    },
+    "lib/settings.ts": {
+      "mtime_ms": 1782820854373.4458,
+      "symbols": [
+        "PosLookupMode",
+        "POS_LOOKUP_MODES",
+        "parsePosLookupMode",
+        "defaultPosLookupMode",
+        "ReceiptFormat",
+        "RECEIPT_FORMATS",
+        "parseReceiptFormat",
+        "receiptWidthMm",
+        "PDFSettings",
+        "DEFAULT_SETTINGS",
+        "loadSettings",
+        "cacheSettings",
+        "fetchSettings",
+        "saveSettings",
+        "EmailSettings",
+        "DEFAULT_EMAIL_SETTINGS",
+        "fetchEmailSettings",
+        "saveEmailSettings",
+        "hexToRgb"
+      ]
+    },
+    "lib/stock-count/aggregate.ts": {
+      "mtime_ms": 1782985066869.6099,
+      "symbols": [
+        "RowEditsByKey",
+        "rowKey",
+        "computeUploadAggregates",
+        "computeAllPhotoAggregates",
+        "buildUnmatchedReviewRows",
+        "subtractAggregates",
+        "mergePhotoAggregatesIntoCounts",
+        "draftIdsThatContributedToCounts",
+        "clearResolvedKeysForUpload",
+        "applyResumeDraftsToCounts"
+      ]
+    },
+    "lib/stock-count/manual.ts": {
+      "mtime_ms": 1782978807021.6084,
+      "symbols": [
+        "round2",
+        "PendingAdjustment",
+        "computePendingAdjustments",
+        "getRowDelta",
+        "buildAdjustmentTransactions"
+      ]
+    },
+    "lib/stock-count/match.ts": {
+      "mtime_ms": 1782993337409.0798,
+      "symbols": [
+        "ProductMatchResult",
+        "matchProduct"
+      ]
+    },
+    "lib/stock-count/newProduct.ts": {
+      "mtime_ms": 1782985066869.6099,
+      "symbols": [
+        "NewProductInput",
+        "createStockCountProduct"
+      ]
+    },
+    "lib/stock-count/types.ts": {
+      "mtime_ms": 1782978807021.6084,
+      "symbols": [
+        "ExtractedStockCountRow",
+        "StockCountUploadStatus",
+        "RESUMABLE_DRAFT_STATUSES",
+        "TERMINAL_UPLOAD_STATUSES",
+        "StockCountUpload",
+        "ReviewRowStatus",
+        "UnmatchedReviewRow",
+        "ReviewFilter"
+      ]
+    },
+    "lib/stock-count/upload.ts": {
+      "mtime_ms": 1782985066869.6099,
+      "symbols": [
+        "MAX_PHOTO_BYTES",
+        "MAX_PHOTOS_PER_BATCH",
+        "STALE_DRAFT_MS",
+        "UploadSignature",
+        "validatePhotoFiles",
+        "fetchUploadSignature",
+        "uploadToCloudinary",
+        "extractStockCountPhotos",
+        "fetchResumableDrafts",
+        "completeStockCountUploads",
+        "parseExtractedRows",
+        "loadResolvedProductMap",
+        "saveResolvedProductMap",
+        "loadDismissedRowKeys",
+        "saveDismissedRowKeys",
+        "loadRowEdits",
+        "saveRowEdits",
+        "hashFile",
+        "loadUploadedHashes",
+        "saveUploadedHashes",
+        "formatStaleAge"
+      ]
+    },
+    "lib/stock.ts": {
+      "mtime_ms": 1782978807022.6084,
+      "symbols": [
+        "LOW_STOCK_THRESHOLD",
+        "applyClientStockDelta",
+        "buildStockByProductId",
+        "computeStock",
+        "getLowStockItems"
+      ]
+    },
+    "lib/types.ts": {
+      "mtime_ms": 1782810421670.8486,
+      "symbols": [
+        "ProductCategory",
+        "Unit",
+        "Organization",
+        "Branch",
+        "TransferStatus",
+        "StockTransfer",
+        "Product",
+        "TransactionType",
+        "TransactionSource",
+        "SaleLine",
+        "Role",
+        "TeamUser",
+        "InventoryTransaction",
+        "IncidentReason",
+        "INCIDENT_REASON_LABELS",
+        "Incident"
+      ]
+    },
+    "next-env.d.ts": {
+      "mtime_ms": 1782913394780.2454,
+      "symbols": []
+    },
+    "next.config.ts": {
+      "mtime_ms": 1780499533402.407,
+      "symbols": []
+    },
+    "prisma.config.ts": {
+      "mtime_ms": 1780496924917.3162,
+      "symbols": []
+    },
+    "prisma/seed.ts": {
+      "mtime_ms": 1782812535506.0398,
+      "symbols": []
+    },
+    "scripts/check-legacy-adjustments.ts": {
+      "mtime_ms": 1782978807025.6086,
+      "symbols": []
+    },
+    "scripts/check-products.ts": {
+      "mtime_ms": 1780514315253.4565,
+      "symbols": []
+    },
+    "scripts/drop-import-stock-txns.ts": {
+      "mtime_ms": 1782286380157.4216,
+      "symbols": []
+    },
+    "scripts/import-products.ts": {
+      "mtime_ms": 1780537566901.8557,
+      "symbols": []
+    },
+    "scripts/lookup-catalog.ts": {
+      "mtime_ms": 1782912863520.2625,
+      "symbols": []
+    },
+    "scripts/record-past-sale.ts": {
+      "mtime_ms": 1782911474243.63,
+      "symbols": []
+    },
+    "scripts/verify-phase0.ts": {
+      "mtime_ms": 1782978807025.6086,
+      "symbols": []
+    },
+    "scripts/verify-phase1.ts": {
+      "mtime_ms": 1782978807025.6086,
+      "symbols": []
+    },
+    "scripts/verify-phase2.ts": {
+      "mtime_ms": 1782978807026.6086,
+      "symbols": []
+    },
+    "scripts/verify-phase3.ts": {
+      "mtime_ms": 1782978807026.6086,
+      "symbols": []
+    },
+    "scripts/verify-phase4.ts": {
+      "mtime_ms": 1782978807026.6086,
+      "symbols": []
+    },
+    "scripts/verify-phase5.ts": {
+      "mtime_ms": 1782978807026.6086,
+      "symbols": []
+    },
+    "scripts/verify-phase6.ts": {
+      "mtime_ms": 1782993337409.0798,
+      "symbols": []
+    },
+    "scripts/verify-pos-price-sync.ts": {
+      "mtime_ms": 1783081856768.5186,
+      "symbols": []
+    },
+    "scripts/verify-stock-count.ts": {
+      "mtime_ms": 1782978807027.6086,
+      "symbols": []
+    }
+  }
+}

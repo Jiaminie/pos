@@ -3,10 +3,12 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { BrandPicker } from '@/components/pos/BrandPicker'
+import { CartQtyControl } from '@/components/pos/CartQtyControl'
 import { CategoryPicker } from '@/components/pos/CategoryPicker'
+import { QtyEntryDialog } from '@/components/pos/QtyEntryDialog'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Select from '@radix-ui/react-select'
-import { AlertCircle, ChevronDown, FileText, ImageOff, Minus, Plus, Printer, Search, ShoppingCart, Trash2, WifiOff, X } from 'lucide-react'
+import { AlertCircle, ChevronDown, FileText, ImageOff, Printer, Search, ShoppingCart, Trash2, WifiOff, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { createMany as createManyTransactions } from '@/lib/db/transactions'
 import { drain } from '@/lib/db/syncQueue'
@@ -32,7 +34,6 @@ import {
   posProductCardClass,
   posProductGridClass,
   posProductImageClass,
-  posQtyBtnClass,
   type DeviceUiMode,
 } from '@/lib/device-ui'
 import { INCIDENT_REASON_LABELS } from '@/lib/types'
@@ -154,6 +155,9 @@ export default function POSPage() {
   const skipCartPersist = useRef(true)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const lastBarcodeAdd = useRef('')
+  const longPressTimer = useRef<number | null>(null)
+  const suppressProductClick = useRef(false)
+  const [addQtyProduct, setAddQtyProduct] = useState<Product | null>(null)
 
   // Restore cart from localStorage after mount (avoids SSR/client hydration mismatch)
   useEffect(() => {
@@ -349,16 +353,55 @@ export default function POSPage() {
     if (!q.trim()) lastBarcodeAdd.current = ''
   }
 
-  function addToCart(product: Product) {
+  function addToCart(product: Product, qty = 1) {
+    if (qty <= 0) return
     setCart((prev) => {
       const existing = prev.find((i) => i.id === product.id)
-      if (existing) return prev.map((i) => i.id === product.id ? { ...i, qty: i.qty + 1 } : i)
-      return [...prev, { ...product, qty: 1, unitPrice: product.sellingPrice }]
+      if (existing) return prev.map((i) => i.id === product.id ? { ...i, qty: i.qty + qty } : i)
+      return [...prev, { ...product, qty, unitPrice: product.sellingPrice }]
     })
     if (deviceUiMode === 'mobile') setCartOpen(true)
   }
 
+  useEffect(() => () => clearProductLongPress(), [])
+
+  function clearProductLongPress() {
+    if (longPressTimer.current != null) {
+      window.clearTimeout(longPressTimer.current)
+      longPressTimer.current = null
+    }
+  }
+
+  function startProductLongPress(product: Product) {
+    clearProductLongPress()
+    longPressTimer.current = window.setTimeout(() => {
+      longPressTimer.current = null
+      suppressProductClick.current = true
+      openAddQtyDialog(product)
+    }, 500)
+  }
+
+  function openAddQtyDialog(product: Product) {
+    const stock = stockByProductId[product.id] ?? (product.initialStock ?? 0)
+    if (stock < LOW_STOCK_THRESHOLD) {
+      router.push(`/products?restock=${encodeURIComponent(product.id)}`)
+      return
+    }
+    setAddQtyProduct(product)
+  }
+
+  function confirmAddQty(qty: number) {
+    if (!addQtyProduct || qty <= 0) return
+    addToCart(addQtyProduct, qty)
+    toast.success(`Added ${qty.toLocaleString()} × ${addQtyProduct.name}`)
+    setAddQtyProduct(null)
+  }
+
   function handleProductClick(product: Product) {
+    if (suppressProductClick.current) {
+      suppressProductClick.current = false
+      return
+    }
     const stock = stockByProductId[product.id] ?? (product.initialStock ?? 0)
     if (stock < LOW_STOCK_THRESHOLD) {
       router.push(`/products?restock=${encodeURIComponent(product.id)}`)
@@ -410,8 +453,21 @@ export default function POSPage() {
 
   function setQty(id: string, delta: number) {
     setCart((prev) =>
-      prev.map((i) => i.id === id ? { ...i, qty: i.qty + delta } : i).filter((i) => i.qty > 0)
+      prev
+        .map((i) => {
+          if (i.id !== id) return i
+          return { ...i, qty: Math.max(0, i.qty + delta) }
+        })
+        .filter((i) => i.qty > 0)
     )
+  }
+
+  function setItemQty(id: string, qty: number) {
+    if (qty <= 0) {
+      removeFromCart(id)
+      return
+    }
+    setCart((prev) => prev.map((i) => (i.id === id ? { ...i, qty } : i)))
   }
 
   function removeFromCart(id: string) {
@@ -890,40 +946,68 @@ export default function POSPage() {
                     ? 'border-amber-300 bg-amber-50'
                     : 'border-gray-200'
                 return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => handleProductClick(p)}
-                    title={isOut ? 'Out of stock — open Products to restock' : isLow ? 'Low stock — open Products to restock' : undefined}
-                    className={posProductCardClass(deviceUiMode, stockClass)}
-                  >
-                    {p.imageUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.imageUrl} alt={p.name} loading="lazy" decoding="async" className={posProductImageClass(deviceUiMode)} />
-                    ) : (
-                      <div className={`w-full flex items-center justify-center ${touchMode ? 'h-32' : 'h-28'} ${isLow ? 'bg-amber-100/60' : 'bg-gray-100'} ${mobilePos ? '!h-36' : ''}`}>
-                        <ImageOff size={touchMode ? 26 : 22} className="text-gray-300" />
+                  <div key={p.id} className={posProductCardClass(deviceUiMode, stockClass)}>
+                    <button
+                      type="button"
+                      onClick={() => handleProductClick(p)}
+                      onPointerDown={() => startProductLongPress(p)}
+                      onPointerUp={clearProductLongPress}
+                      onPointerLeave={clearProductLongPress}
+                      onPointerCancel={clearProductLongPress}
+                      title={
+                        isOut
+                          ? 'Out of stock — open Products to restock'
+                          : isLow
+                            ? 'Low stock — open Products to restock'
+                            : touchMode
+                              ? 'Tap to add 1 · hold for quantity · or use Qty button'
+                              : undefined
+                      }
+                      className="w-full text-left"
+                    >
+                      {p.imageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={p.imageUrl} alt={p.name} loading="lazy" decoding="async" className={posProductImageClass(deviceUiMode)} />
+                      ) : (
+                        <div className={`w-full flex items-center justify-center ${touchMode ? 'h-32' : 'h-28'} ${isLow ? 'bg-amber-100/60' : 'bg-gray-100'} ${mobilePos ? '!h-36' : ''}`}>
+                          <ImageOff size={touchMode ? 26 : 22} className="text-gray-300" />
+                        </div>
+                      )}
+                      <div className={touchMode ? 'p-3.5' : 'p-3'}>
+                        <p className={`font-medium leading-snug ${touchMode ? 'text-base' : 'text-sm'}`}>{p.name}</p>
+                        <p className="text-xs text-gray-400 font-mono mt-0.5">{p.sku}</p>
+                        {p.specification && (
+                          <p className="text-xs text-gray-500 mt-0.5">{p.specification}</p>
+                        )}
+                        <p className="text-blue-600 font-semibold mt-2">KES {p.sellingPrice.toLocaleString()}</p>
+                        {canDiscount(p, minMarkupPercent) && (
+                          <p className="text-xs text-amber-600 mt-0.5">
+                            Min: KES {effectiveLowestPrice(p, minMarkupPercent).toLocaleString()}
+                          </p>
+                        )}
+                        {isLow && (
+                          <p className="text-xs text-amber-600 font-medium mt-1">
+                            {stock === 0 ? '⚠ Out of stock' : `⚠ ${stock} ${p.stockUnit ?? 'left'}`}
+                          </p>
+                        )}
+                      </div>
+                    </button>
+                    {!isOut && !isLow && (
+                      <div className={`${touchMode ? 'px-3.5 pb-3.5' : 'px-3 pb-3'}`}>
+                        <button
+                          type="button"
+                          onClick={() => openAddQtyDialog(p)}
+                          className={`w-full rounded-lg border border-blue-200 text-blue-700 font-medium transition-colors ${
+                            touchMode
+                              ? 'min-h-10 text-sm active:bg-blue-50 active:scale-[0.98]'
+                              : 'py-1.5 text-xs hover:bg-blue-50'
+                          }`}
+                        >
+                          {touchMode ? 'Qty' : 'Add qty…'}
+                        </button>
                       </div>
                     )}
-                    <div className={touchMode ? 'p-3.5' : 'p-3'}>
-                      <p className={`font-medium leading-snug ${touchMode ? 'text-base' : 'text-sm'}`}>{p.name}</p>
-                      <p className="text-xs text-gray-400 font-mono mt-0.5">{p.sku}</p>
-                      {p.specification && (
-                        <p className="text-xs text-gray-500 mt-0.5">{p.specification}</p>
-                      )}
-                      <p className="text-blue-600 font-semibold mt-2">KES {p.sellingPrice.toLocaleString()}</p>
-                      {canDiscount(p, minMarkupPercent) && (
-                        <p className="text-xs text-amber-600 mt-0.5">
-                          Min: KES {effectiveLowestPrice(p, minMarkupPercent).toLocaleString()}
-                        </p>
-                      )}
-                      {isLow && (
-                        <p className="text-xs text-amber-600 font-medium mt-1">
-                          {stock === 0 ? '⚠ Out of stock' : `⚠ ${stock} ${p.stockUnit ?? 'left'}`}
-                        </p>
-                      )}
-                    </div>
-                  </button>
+                  </div>
                 )
               })}
             </div>
@@ -1111,16 +1195,15 @@ export default function POSPage() {
                   </div>
 
                   <div className="flex items-center justify-between gap-2">
-                    <div className={`flex items-center ${touchMode ? 'gap-2' : 'gap-1'}`}>
-                      <button type="button" onClick={() => setQty(item.id, -1)} className={posQtyBtnClass(deviceUiMode)}>
-                        <Minus size={touchMode ? 18 : 12} />
-                      </button>
-                      <span className={`text-center tabular-nums font-medium ${touchMode ? 'text-base w-8' : 'text-sm w-6'}`}>{item.qty}</span>
-                      <button type="button" onClick={() => setQty(item.id, 1)} className={posQtyBtnClass(deviceUiMode)}>
-                        <Plus size={touchMode ? 18 : 12} />
-                      </button>
-                    </div>
-                    <span className={`text-sm font-semibold tabular-nums ${priceSavePending ? 'text-blue-600' : ''}`}>
+                    <CartQtyControl
+                      qty={item.qty}
+                      deviceUiMode={deviceUiMode}
+                      stockAvailable={stockByProductId[item.id] ?? item.initialStock ?? 0}
+                      stockUnit={item.stockUnit}
+                      onDelta={(delta) => setQty(item.id, delta)}
+                      onSetQty={(qty) => setItemQty(item.id, qty)}
+                    />
+                    <span className={`text-sm font-semibold tabular-nums shrink-0 ${priceSavePending ? 'text-blue-600' : ''}`}>
                       KES {(displayUnitPrice * item.qty).toLocaleString()}
                     </span>
                   </div>
@@ -1455,6 +1538,28 @@ export default function POSPage() {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+
+      <QtyEntryDialog
+        open={!!addQtyProduct}
+        onOpenChange={(open) => {
+          if (!open) {
+            setAddQtyProduct(null)
+            suppressProductClick.current = false
+          }
+        }}
+        title="Add to cart"
+        subtitle={addQtyProduct?.name}
+        initialQty={1}
+        onConfirm={confirmAddQty}
+        deviceUiMode={deviceUiMode}
+        stockAvailable={
+          addQtyProduct
+            ? stockByProductId[addQtyProduct.id] ?? addQtyProduct.initialStock ?? 0
+            : null
+        }
+        stockUnit={addQtyProduct?.stockUnit}
+        confirmLabel="Add"
+      />
     </div>
   )
 }

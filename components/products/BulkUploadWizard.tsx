@@ -307,7 +307,7 @@ export function BulkUploadWizard({ open, onOpenChange, onComplete }: Props) {
                         <th className="text-left px-3 py-2">Category</th>
                         <th className="text-right px-3 py-2">In stock</th>
                         <th className="text-right px-3 py-2">Selling</th>
-                        <th className="text-right px-3 py-2">Cost</th>
+                        <th className="text-right px-3 py-2">Buying</th>
                         <th className="text-left px-3 py-2">Status</th>
                       </tr>
                     </thead>

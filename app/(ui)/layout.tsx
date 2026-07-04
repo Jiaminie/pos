@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
@@ -25,11 +25,24 @@ import { getMyBranchId } from '@/lib/branch'
 import { getDeviceUiMode, type DeviceUiMode } from '@/lib/device-ui'
 import { getAll as getBranches } from '@/lib/db/branches'
 import { replaceCatalogFromServer } from '@/lib/db/seed'
-import { fetchMe, getCachedAuthUser, logout, type AuthUser, canViewReports, hasPermission } from '@/lib/auth'
+import { cacheAuthUser, clearCachedAuthUser, fetchMe, getCachedAuthUser, logout, type AuthUser, canViewReports, hasPermission } from '@/lib/auth'
 import type { Branch } from '@/lib/types'
 import { toast } from 'sonner'
 
 const SIDEBAR_COLLAPSED_KEY = 'pos_sidebar_collapsed'
+// How often to re-sync permissions from the server as a fallback when the tab
+// stays focused. Focus/visibility/online events cover most cases; this catches
+// the rest without hammering the endpoint.
+const AUTH_REVALIDATE_MS = 60_000
+
+/** Did the identity, branch, or effective permission set actually change? */
+function authChanged(a: AuthUser | null, b: AuthUser | null): boolean {
+  if (!a || !b) return a !== b
+  if (a.userId !== b.userId || a.role !== b.role || a.branchId !== b.branchId) return true
+  const pa = [...(a.permissions ?? [])].sort().join(',')
+  const pb = [...(b.permissions ?? [])].sort().join(',')
+  return pa !== pb
+}
 
 const nav = [
   { href: '/dashboard',  label: 'Dashboard',  icon: LayoutDashboard },
@@ -65,6 +78,65 @@ export default function UILayout({ children }: { children: React.ReactNode }) {
   const [branchMenuOpen, setBranchMenuOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [deviceUiMode, setDeviceUiMode] = useState<DeviceUiMode>('desktop')
+
+  // Mirror authUser into a ref so the revalidation callback can compare against
+  // the latest value without being re-created (and re-binding listeners) on
+  // every change.
+  const authUserRef = useRef<AuthUser | null>(null)
+  useEffect(() => {
+    authUserRef.current = authUser
+  }, [authUser])
+
+  // Pull the current session + effective permissions from the server and apply
+  // them only when something meaningful changed. Keeps this device's UI in sync
+  // when an owner edits role permissions elsewhere — no reload or re-login.
+  //
+  // Unlike fetchMe() (used at mount/login), a 401 here is the only signal that
+  // actually means "logged out" — any other failure (500, rate limit, a flaky
+  // request) must leave the existing session alone, or a transient server hiccup
+  // would silently strand a cashier back on the PIN screen mid-shift.
+  const revalidateAuth = useCallback(async () => {
+    let res: Response
+    try {
+      res = await fetch('/api/auth/me', { cache: 'no-store' })
+    } catch {
+      return
+    }
+    if (res.status === 401) {
+      const prev = authUserRef.current
+      if (prev) {
+        clearCachedAuthUser()
+        setAuthUser(null)
+      }
+      return
+    }
+    if (!res.ok) return
+    const { data: fresh } = await res.json().catch(() => ({ data: null }))
+    if (!fresh) return
+    const prev = authUserRef.current
+    if (!authChanged(prev, fresh)) return
+    cacheAuthUser(fresh)
+    if (prev) toast.info('Your permissions were updated')
+    setAuthUser(fresh)
+  }, [])
+
+  // Re-sync on the natural "returning to the app" signals plus a slow interval.
+  useEffect(() => {
+    if (!branchId) return
+    const revalidateIfVisible = () => {
+      if (!document.hidden) void revalidateAuth()
+    }
+    window.addEventListener('focus', revalidateIfVisible)
+    window.addEventListener('online', revalidateIfVisible)
+    document.addEventListener('visibilitychange', revalidateIfVisible)
+    const interval = setInterval(revalidateIfVisible, AUTH_REVALIDATE_MS)
+    return () => {
+      window.removeEventListener('focus', revalidateIfVisible)
+      window.removeEventListener('online', revalidateIfVisible)
+      document.removeEventListener('visibilitychange', revalidateIfVisible)
+      clearInterval(interval)
+    }
+  }, [branchId, revalidateAuth])
 
   useEffect(() => {
     const id = getMyBranchId()

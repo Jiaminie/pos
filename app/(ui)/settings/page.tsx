@@ -574,9 +574,9 @@ export default function SettingsPage() {
                 <section className="bg-amber-50/60 border border-amber-200/80 rounded-xl p-5 space-y-3">
                   <h3 className="text-xs font-semibold text-amber-900 uppercase tracking-wide">How it works</h3>
                   <ol className="text-xs text-amber-900/80 space-y-2 list-decimal list-inside leading-relaxed">
-                    <li>Floor = cost × (markup% ÷ 100). At 150%, cost KES 100 → floor KES 150.</li>
+                    <li>Default floor = buying price × (markup% ÷ 100). At 150%, buying KES 100 → floor KES 150.</li>
                     <li>Floor is capped at selling price — no discount if markup exceeds list price.</li>
-                    <li>Per-product <strong className="font-medium">Lowest price</strong> can raise the floor, never lower it.</li>
+                    <li>A per-product <strong className="font-medium">Lowest price</strong> overrides this rule entirely — it becomes the floor, even below the buying price.</li>
                   </ol>
                   <div className="rounded-lg bg-white border border-amber-200/60 p-3 text-xs font-mono text-gray-700 space-y-1">
                     <p>cost = 100 · sell = 200 · markup = {settings.minMarkupPercent}%</p>
