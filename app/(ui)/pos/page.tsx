@@ -146,6 +146,10 @@ export default function POSPage() {
   const [minMarkupPercent, setMinMarkupPercent] = useState(DEFAULT_MIN_MARKUP_PERCENT)
   const [posLookupMode, setPosLookupMode] = useState<PosLookupMode>('catalog')
   const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({})
+  // Per-line buying price for items with no cost/floor on record. Entering one
+  // sets the line's lowest sell price so a discount becomes possible (but can't
+  // go below what it cost to buy). Draft text; committed onto the cart line.
+  const [costDrafts, setCostDrafts] = useState<Record<string, string>>({})
   const [cartDiscountInput, setCartDiscountInput] = useState('')
   const [cartDiscountApplied, setCartDiscountApplied] = useState(0)
   const [deviceUiMode, setDeviceUiMode] = useState<DeviceUiMode>('desktop')
@@ -435,6 +439,11 @@ export default function POSPage() {
       delete next[id]
       return next
     })
+    setCostDrafts((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
   }
 
   function clearPriceDraft(id: string) {
@@ -444,6 +453,54 @@ export default function POSPage() {
       delete next[id]
       return next
     })
+  }
+
+  /** Items with no cost and no floor on record can't be discounted until the
+   *  cashier supplies a buying price to anchor the floor. */
+  function needsBuyingPrice(item: CartItem): boolean {
+    return item.costPrice <= 0
+  }
+
+  function costDraftValue(item: CartItem): string {
+    return costDrafts[item.id] ?? (item.lowestPrice != null ? String(item.lowestPrice) : '')
+  }
+
+  function commitBuyingPrice(id: string) {
+    const item = cart.find((i) => i.id === id)
+    if (!item) return
+
+    const raw = costDraftValue(item)
+    setCostDrafts((prev) => {
+      if (!(id in prev)) return prev
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+
+    const val = parseFloat(raw)
+    // Removing the floor also drops any discount that depended on it — without a
+    // buying price there's nothing to justify selling below list.
+    const clearFloor = () => {
+      clearPriceDraft(id)
+      setCart((prev) =>
+        prev.map((i) => (i.id === id ? { ...i, lowestPrice: undefined, unitPrice: i.sellingPrice } : i)),
+      )
+    }
+
+    // Empty / invalid → drop any floor we set (item reverts to non-discountable).
+    if (raw.trim() === '' || isNaN(val) || val <= 0) {
+      if (item.lowestPrice != null) clearFloor()
+      return
+    }
+    if (val >= item.sellingPrice) {
+      toast.warning(`Buying price must be below the list price of KES ${item.sellingPrice.toLocaleString()}`)
+      if (item.lowestPrice != null) clearFloor()
+      return
+    }
+    if (item.lowestPrice === val) return
+
+    setCart((prev) => prev.map((i) => (i.id === id ? { ...i, lowestPrice: val } : i)))
+    toast.success(`Floor set to KES ${val.toLocaleString()} — you can now discount this item`)
   }
 
   function priceDraftValue(item: CartItem): string {
@@ -615,6 +672,8 @@ export default function POSPage() {
     setCart([])
     setCartDiscountInput('')
     setCartDiscountApplied(0)
+    setPriceDrafts({})
+    setCostDrafts({})
     localStorage.removeItem('pos_cart')
     setChecking(false)
     drainSales().catch(() => {})
@@ -714,6 +773,7 @@ export default function POSPage() {
       setCartDiscountInput('')
       setCartDiscountApplied(0)
       setPriceDrafts({})
+      setCostDrafts({})
       localStorage.removeItem('pos_cart')
       setQuoteOpen(false)
       setQuoteForm({ customerName: '', customerPhone: '', note: '' })
@@ -1046,6 +1106,39 @@ export default function POSPage() {
                         </span>
                       )}
                     </div>
+
+                    {needsBuyingPrice(item) && (
+                      <div className="space-y-1">
+                        <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2">
+                          <label htmlFor={`cart-cost-${item.id}`} className="text-[11px] font-medium text-gray-600">
+                            Buying price
+                          </label>
+                          <input
+                            id={`cart-cost-${item.id}`}
+                            type="number"
+                            min={0}
+                            step="1"
+                            inputMode="numeric"
+                            value={costDraftValue(item)}
+                            placeholder="Enter cost to enable a discount"
+                            onChange={(e) => setCostDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                            onBlur={() => commitBuyingPrice(item.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                commitBuyingPrice(item.id)
+                              }
+                            }}
+                            className="min-w-0 w-full border border-gray-200 rounded-md px-2 py-1.5 text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                          />
+                        </div>
+                        {!discountable && (
+                          <p className="text-[10px] text-gray-500">
+                            No minimum on record — set the buying price to discount below KES {item.sellingPrice.toLocaleString()}.
+                          </p>
+                        )}
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
                       <label htmlFor={`cart-price-${item.id}`} className="text-[11px] font-medium text-gray-600">
