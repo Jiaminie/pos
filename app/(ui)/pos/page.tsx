@@ -979,7 +979,7 @@ export default function POSPage() {
       <aside className={
         mobilePos
           ? 'fixed inset-x-0 bottom-0 z-50 w-full max-h-[88vh] rounded-t-2xl border-t border-gray-200 flex flex-col bg-gray-50 safe-area-pb shadow-2xl'
-          : `w-full md:w-80 border-t md:border-t-0 md:border-l border-gray-200 flex flex-col bg-gray-50 flex-[0_0_auto] ${
+          : `w-full md:w-96 lg:w-[28rem] border-t md:border-t-0 md:border-l border-gray-200 flex flex-col bg-gray-50 shrink-0 ${
               deviceUiMode === 'touch' ? 'max-h-[60vh] md:max-h-full' : 'max-h-[50vh] md:max-h-full'
             }`
       }>
@@ -1100,7 +1100,7 @@ export default function POSPage() {
                     </div>
                   </div>
 
-                  <div className="border-t border-gray-100 bg-gray-50/60 px-3 py-2.5">
+                  <div className="border-t border-gray-100 bg-gray-50/60 px-3 py-3 space-y-2.5">
                     <CartQtyControl
                       qty={item.qty}
                       deviceUiMode={deviceUiMode}
@@ -1108,15 +1108,17 @@ export default function POSPage() {
                       stockUnit={item.stockUnit}
                       onDelta={(delta) => setQty(item.id, delta)}
                       onSetQty={(qty) => setItemQty(item.id, qty)}
-                      lineTotal={
-                        <>
-                          <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Line total</p>
-                          <p className={`text-sm font-semibold tabular-nums leading-tight ${priceSavePending ? 'text-blue-600' : 'text-gray-900'}`}>
-                            KES {(displayUnitPrice * item.qty).toLocaleString()}
-                          </p>
-                        </>
-                      }
                     />
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-200/80 bg-blue-50 px-3 py-2.5">
+                      <span className="text-xs font-semibold text-blue-900/70 shrink-0">Line total</span>
+                      <span
+                        className={`min-w-0 text-right text-base font-bold tabular-nums tracking-tight break-all ${
+                          priceSavePending ? 'text-blue-600' : 'text-blue-950'
+                        }`}
+                      >
+                        KES {(displayUnitPrice * item.qty).toLocaleString()}
+                      </span>
+                    </div>
                   </div>
                 </div>
               )
@@ -1141,9 +1143,11 @@ export default function POSPage() {
               />
             </div>
           )}
-          <div className="flex justify-between text-sm font-semibold">
-            <span>Total</span>
-            <span>KES {cartTotals.grandTotal.toLocaleString()}</span>
+          <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 flex items-center justify-between gap-3">
+            <span className="text-sm font-semibold text-gray-800">Total</span>
+            <span className="text-lg font-bold tabular-nums tracking-tight text-blue-950 break-all text-right">
+              KES {cartTotals.grandTotal.toLocaleString()}
+            </span>
           </div>
           <div className="flex gap-2">
             <button
