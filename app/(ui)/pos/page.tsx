@@ -75,12 +75,8 @@ function computeCartTotals(
 function CartTotalsBreakdown({ totals }: { totals: CartTotals }) {
   const hasLineAdjustment = totals.lineDiscountTotal > 0 || totals.lineMarkupTotal > 0
   return (
-    <div className="space-y-1">
-      <div className="flex justify-between text-xs text-gray-500">
-        <span>List total</span>
-        <span className={hasLineAdjustment ? 'line-through' : ''}>KES {totals.listTotal.toLocaleString()}</span>
-      </div>
-      {totals.lineDiscountTotal > 0 && (
+    <div className="space-y-1 -mt-1">
+          {totals.lineDiscountTotal > 0 && (
         <div className="flex justify-between text-xs text-amber-600">
           <span>Line discounts</span>
           <span>−KES {totals.lineDiscountTotal.toLocaleString()}</span>
@@ -154,6 +150,7 @@ export default function POSPage() {
   const [cartDiscountApplied, setCartDiscountApplied] = useState(0)
   const [deviceUiMode, setDeviceUiMode] = useState<DeviceUiMode>('desktop')
   const [cartOpen, setCartOpen] = useState(false)
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set())
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
   const alertedIds = useRef<Set<string>>(new Set())
   const skipCartPersist = useRef(true)
@@ -460,6 +457,18 @@ export default function POSPage() {
       if (!(id in prev)) return prev
       const next = { ...prev }
       delete next[id]
+      return next
+    })
+  }
+
+  function toggleExpandedItem(id: string) {
+    setExpandedItems((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
       return next
     })
   }
@@ -1119,13 +1128,22 @@ export default function POSPage() {
       <aside className={
         mobilePos
           ? 'fixed inset-x-0 bottom-0 z-50 w-full max-h-[88vh] rounded-t-2xl border-t border-gray-200 flex flex-col bg-gray-50 safe-area-pb shadow-2xl'
-          : `w-full md:w-96 lg:w-[28rem] border-t md:border-t-0 md:border-l border-gray-200 flex flex-col bg-gray-50 shrink-0 ${
+          : `w-full md:w-80 lg:w-96 border-t md:border-t-0 md:border-l border-gray-200 flex flex-col bg-gray-50 shrink-0 ${
               deviceUiMode === 'touch' ? 'max-h-[60vh] md:max-h-full' : 'max-h-[50vh] md:max-h-full'
             }`
       }>
         <div className={`flex items-center gap-2 px-5 border-b border-gray-200 ${touchMode ? 'py-4' : 'py-4'}`}>
           <ShoppingCart size={touchMode ? 20 : 18} className="text-gray-500" />
           <span className={`font-semibold ${touchMode ? 'text-base' : 'text-sm'}`}>Cart</span>
+          <button
+            type="button"
+            onClick={() => { setIncidentOpen(true); setIncidentDrafts([]); setIncidentSearch('') }}
+            className="ml-auto flex items-center gap-1.5 px-3 py-2 rounded-lg text-amber-600 hover:bg-amber-50 active:scale-95"
+            aria-label="Log missed sale"
+          >
+            <AlertCircle size={touchMode ? 20 : 18} />
+            <span className={`font-medium ${touchMode ? 'text-sm' : 'text-xs'}`}>Missed</span>
+          </button>
           {cart.length > 0 && (
             <span className={`ml-auto bg-blue-600 text-white rounded-full ${touchMode ? 'text-sm px-2.5 py-0.5' : 'text-xs px-2 py-0.5'}`}>
               {cartItemCount}
@@ -1154,10 +1172,22 @@ export default function POSPage() {
               const priceSavePending = canSaveItemPrice(item)
               const displayUnitPrice = resolvedItemUnitPrice(item)
               const displayDisc = discountPerUnit(item.sellingPrice, displayUnitPrice)
+              const isExpanded = expandedItems.has(item.id)
               return (
                 <div key={item.id} className="rounded-xl border border-gray-200 bg-white min-w-0 overflow-hidden">
-                  <div className="flex items-start justify-between gap-2 px-3 pt-3 pb-2">
-                    <p className="text-sm font-medium leading-snug truncate min-w-0">{item.name}</p>
+                  <div className={`flex items-center justify-between gap-2 px-3 ${isExpanded ? 'pt-3 pb-2' : 'py-2.5'}`}>
+                    <button
+                      type="button"
+                      onClick={() => toggleExpandedItem(item.id)}
+                      className="flex-1 flex items-start gap-2 min-w-0"
+                    >
+                      <p className="text-sm font-medium leading-snug text-left truncate min-w-0">{item.name}</p>
+                    </button>
+                    {!isExpanded && (
+                      <span className="text-sm font-bold text-blue-600 tabular-nums shrink-0">
+                        KES {(displayUnitPrice * item.qty).toLocaleString()}
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={() => removeFromCart(item.id)}
@@ -1172,6 +1202,7 @@ export default function POSPage() {
                     </button>
                   </div>
 
+                  {isExpanded && (
                   <div className="mx-3 mb-3 rounded-lg border border-amber-100 bg-amber-50/70 p-2.5 space-y-2">
                     <div className="flex items-center justify-between gap-2 text-[11px] tabular-nums">
                       <span className="text-gray-500">
@@ -1287,7 +1318,9 @@ export default function POSPage() {
                       </div>
                     )}
                   </div>
+                  )}
 
+                  {isExpanded && (
                   <div className="border-t border-gray-100 bg-gray-50/60 px-3 py-3 space-y-2.5">
                     <CartQtyControl
                       qty={item.qty}
@@ -1308,6 +1341,7 @@ export default function POSPage() {
                       </span>
                     </div>
                   </div>
+                  )}
                 </div>
               )
             })
@@ -1359,15 +1393,6 @@ export default function POSPage() {
               {checking ? 'Processing…' : 'Checkout'}
             </button>
           </div>
-          <button
-            onClick={() => { setIncidentOpen(true); setIncidentDrafts([]); setIncidentSearch('') }}
-            className={`w-full flex items-center justify-center gap-1.5 border border-amber-300 text-amber-700 rounded-xl font-medium transition-colors ${
-              touchMode ? 'min-h-11 py-3 text-sm active:bg-amber-50 active:scale-[0.98]' : 'py-2 text-xs hover:bg-amber-50'
-            }`}
-          >
-            <AlertCircle size={touchMode ? 15 : 13} />
-            Log missed sale
-          </button>
         </div>
       </aside>
         </>
