@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
       where: {
         ...(productId ? { productId } : {}),
         ...(deviceId ? { deviceId } : {}),
-        ...(scopedBranch ? { OR: [{ branchId: scopedBranch }, { branchId: null }] } : {}),
+        ...(scopedBranch ? { branchId: scopedBranch } : {}),
       },
       // Total ordering: createdAt is non-unique (imported stock txns use
       // createMany → identical Postgres now() timestamp), so the id cursor

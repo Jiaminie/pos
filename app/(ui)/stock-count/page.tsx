@@ -98,6 +98,10 @@ const emptyNewItemForm: NewItemForm = {
   specification: '',
 }
 
+type ManualNewItemForm = NewItemForm & { qty: string }
+
+const emptyManualNewItemForm: ManualNewItemForm = { ...emptyNewItemForm, qty: '' }
+
 type EditRowForm = {
   description: string
   qty: string
@@ -169,10 +173,14 @@ export default function StockCountPage() {
   const [rowEdits, setRowEdits] = useState<Record<string, ExtractedStockCountRow>>({})
   const [editKey, setEditKey] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<EditRowForm>(emptyEditForm)
+  const [manualAddOpen, setManualAddOpen] = useState(false)
+  const [manualNewItemForm, setManualNewItemForm] = useState<ManualNewItemForm>(emptyManualNewItemForm)
+  const [creatingManualItem, setCreatingManualItem] = useState(false)
 
   const photoAppliedRef = useRef<Set<string>>(new Set())
   const submittingRef = useRef(false)
   const creatingItemRef = useRef(false)
+  const creatingManualItemRef = useRef(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Guards the persistence effect below from writing an empty {} over storage
   // before the resume-drafts fetch in loadCatalog has had a chance to hydrate it.
@@ -732,6 +740,72 @@ export default function StockCountPage() {
     }
   }
 
+  function openManualAdd() {
+    setManualNewItemForm(emptyManualNewItemForm)
+    setManualAddOpen(true)
+  }
+
+  function closeManualAdd() {
+    setManualAddOpen(false)
+    setManualNewItemForm(emptyManualNewItemForm)
+  }
+
+  // Standalone product creation for items the photo transcription missed entirely
+  // (so there's no extracted row to attach it to) — the user supplies the count directly.
+  async function handleCreateManualItem() {
+    if (creatingManualItemRef.current) return
+    const name = manualNewItemForm.name.trim()
+    if (!name) {
+      toast.error('Product name is required')
+      return
+    }
+    const sellingPrice = parseFloat(manualNewItemForm.sellingPrice)
+    if (Number.isNaN(sellingPrice) || sellingPrice < 0) {
+      toast.error('Enter a selling price')
+      return
+    }
+    const qty = parseFloat(manualNewItemForm.qty)
+    if (Number.isNaN(qty) || qty < 0) {
+      toast.error('Enter a valid quantity')
+      return
+    }
+    let costPrice: number | undefined
+    if (canSetCostPrice && manualNewItemForm.costPrice.trim()) {
+      costPrice = parseFloat(manualNewItemForm.costPrice)
+      if (Number.isNaN(costPrice) || costPrice < 0) {
+        toast.error('Buying price is not a valid number')
+        return
+      }
+    }
+
+    creatingManualItemRef.current = true
+    setCreatingManualItem(true)
+    try {
+      const product = await createStockCountProduct(
+        {
+          name,
+          sellingPrice,
+          costPrice,
+          categoryId: manualNewItemForm.categoryId || undefined,
+          categoryName: categories.find((c) => c.id === manualNewItemForm.categoryId)?.name ?? null,
+          brand: manualNewItemForm.brand,
+          specification: manualNewItemForm.specification,
+        },
+        products.map((p) => p.sku),
+      )
+      setProducts((prev) => [product, ...prev])
+      const counted = round2(qty)
+      setCountedQtys((prev) => mergePhotoAggregatesIntoCounts(prev, new Map([[product.id, counted]])))
+      closeManualAdd()
+      toast.success(`Added “${product.name}” and counted ${counted}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not create product')
+    } finally {
+      creatingManualItemRef.current = false
+      setCreatingManualItem(false)
+    }
+  }
+
   async function handleSubmit() {
     if (submittingRef.current || pendingAdjustments.length === 0) return
 
@@ -952,6 +1026,117 @@ export default function StockCountPage() {
           <button
             type="button"
             onClick={closeNewItem}
+            className="inline-flex items-center gap-1 rounded-lg border border-gray-300 text-gray-600 px-3 py-1.5 text-xs font-medium hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  function renderManualAddForm() {
+    const set = (patch: Partial<ManualNewItemForm>) => setManualNewItemForm((f) => ({ ...f, ...patch }))
+    return (
+      <div className="rounded-lg border border-gray-200 bg-white p-3">
+        <p className="text-xs font-medium text-gray-700 mb-2">
+          New product · not captured by the photo transcription
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <label className="text-xs text-gray-500 sm:col-span-2">
+            Name
+            <input
+              type="text"
+              autoFocus
+              value={manualNewItemForm.name}
+              onChange={(e) => set({ name: e.target.value })}
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+          <label className="text-xs text-gray-500">
+            Count <span className="text-red-500">*</span>
+            <input
+              type="number"
+              inputMode="decimal"
+              step="any"
+              min="0"
+              value={manualNewItemForm.qty}
+              onChange={(e) => set({ qty: e.target.value })}
+              placeholder="0"
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+          <label className="text-xs text-gray-500">
+            Selling price <span className="text-red-500">*</span>
+            <input
+              type="number"
+              inputMode="decimal"
+              step="any"
+              min="0"
+              value={manualNewItemForm.sellingPrice}
+              onChange={(e) => set({ sellingPrice: e.target.value })}
+              placeholder="0.00"
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+          {canSetCostPrice && (
+            <label className="text-xs text-gray-500">
+              Buying price <span className="text-gray-400">(optional)</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="any"
+                min="0"
+                value={manualNewItemForm.costPrice}
+                onChange={(e) => set({ costPrice: e.target.value })}
+                placeholder="0.00"
+                className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </label>
+          )}
+          <label className="text-xs text-gray-500">
+            Category <span className="text-gray-400">(optional)</span>
+            <select
+              value={manualNewItemForm.categoryId}
+              onChange={(e) => set({ categoryId: e.target.value })}
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Uncategorized (set later)</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs text-gray-500">
+            Brand <span className="text-gray-400">(optional)</span>
+            <input
+              type="text"
+              value={manualNewItemForm.brand}
+              onChange={(e) => set({ brand: e.target.value })}
+              placeholder="UNBRANDED"
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+        </div>
+        <div className="flex items-center gap-2 mt-3">
+          <button
+            type="button"
+            disabled={creatingManualItem}
+            onClick={() => void handleCreateManualItem()}
+            className="inline-flex items-center gap-1 rounded-lg bg-blue-600 text-white px-3 py-1.5 text-xs font-medium hover:bg-blue-700 disabled:opacity-50"
+          >
+            {creatingManualItem ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <PackagePlus size={14} />
+            )}
+            Create &amp; count
+          </button>
+          <button
+            type="button"
+            onClick={closeManualAdd}
             className="inline-flex items-center gap-1 rounded-lg border border-gray-300 text-gray-600 px-3 py-1.5 text-xs font-medium hover:bg-gray-50"
           >
             Cancel
@@ -1442,14 +1627,14 @@ export default function StockCountPage() {
           )}
         </div>
 
-        {unmatchedRows.length > 0 && (
+        {(unmatchedRows.length > 0 || canCreateProduct) && (
           <div className="mb-5 rounded-xl border border-gray-200 overflow-hidden">
             <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
               <h2 className="text-sm font-semibold text-gray-900">Extracted rows needing review</h2>
               <p className="text-xs text-gray-500 mt-0.5">
                 Resolve unmatched or low-confidence rows before submitting
               </p>
-              <div className="flex flex-wrap gap-1 mt-3">
+              <div className="flex flex-wrap items-center gap-1 mt-3">
                 {(['all', 'needs_review', 'unmatched'] as ReviewFilter[]).map((f) => (
                   <button
                     key={f}
@@ -1472,7 +1657,23 @@ export default function StockCountPage() {
                     )}
                   </button>
                 ))}
+                {canCreateProduct && (
+                  <button
+                    type="button"
+                    onClick={() => (manualAddOpen ? closeManualAdd() : openManualAdd())}
+                    className={`ml-1 inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                      manualAddOpen
+                        ? 'border-blue-300 bg-blue-50 text-blue-700'
+                        : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                    }`}
+                    title="Add a product the photo transcription missed entirely"
+                  >
+                    <PackagePlus size={14} /> Add item
+                  </button>
+                )}
               </div>
+
+              {manualAddOpen && <div className="mt-3 max-w-2xl">{renderManualAddForm()}</div>}
 
               {reviewImageGroups.length > 1 && (
                 <div className="flex flex-wrap items-center gap-1.5 mt-3">
@@ -1518,7 +1719,9 @@ export default function StockCountPage() {
               )}
             </div>
             {filteredReviewRows.length === 0 ? (
-              <p className="px-4 py-6 text-sm text-gray-500 text-center">No rows in this filter</p>
+              <p className="px-4 py-6 text-sm text-gray-500 text-center">
+                {unmatchedRows.length === 0 ? 'No rows to review yet' : 'No rows in this filter'}
+              </p>
             ) : (
               <>
                 {/* Desktop: table */}

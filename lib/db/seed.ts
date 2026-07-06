@@ -22,7 +22,10 @@ function parseInitialStock(qty: string | null | undefined): number {
 }
 
 const SYNC_TTL = 5 * 60 * 1000 // 5 minutes
-const SYNC_TS_KEY = 'pos_last_sync_v2'
+// v3: opening stock is now scoped to the origin branch (see ownsOpeningStock
+// below). Bumping the key forces existing devices to re-seed so non-origin
+// branches drop the inherited initialStock baseline.
+const SYNC_TS_KEY = 'pos_last_sync_v3'
 
 type SyncOptions = {
   force?: boolean
@@ -74,6 +77,18 @@ async function fetchCatalogFromServer(
   const organizations: Organization[] = branchesData.length > 0
     ? [{ id: branchesData[0].organizationId, name: '', country: 'KE' }]
     : []
+
+  // Opening stock (product.quantity → initialStock) belongs only to the origin
+  // branch — the HQ branch that historically accumulated the catalog everyone
+  // else borrowed. Every other branch starts from 0 and builds its own stock
+  // purely from its branch-scoped transactions (stock counts, restocks), so a
+  // new branch is a clean slate. NB: HQ is identified by branch code, not the
+  // isPrimary flag (in this org the primary branch is a different store). If the
+  // device's branch can't be resolved yet (unsynced), keep opening stock to
+  // avoid zeroing a legitimate single-branch store.
+  const OPENING_STOCK_BRANCH_CODE = 'HQ'
+  const myBranch = branchId ? branchesData.find((b) => b.id === branchId) : undefined
+  const ownsOpeningStock = myBranch ? myBranch.code === OPENING_STOCK_BRANCH_CODE : true
 
   const transfers: StockTransfer[] = transfersRes?.ok
     ? ((await transfersRes.json()).data ?? []).map((t: Record<string, unknown>) => ({
@@ -144,7 +159,7 @@ async function fetchCatalogFromServer(
         categoryId: p.category ? slugify(p.category) : 'uncategorised',
         brand,
         imageUrl: p.imageUrl ?? undefined,
-        initialStock: parseInitialStock(p.quantity),
+        initialStock: ownsOpeningStock ? parseInitialStock(p.quantity) : 0,
         createdAt: p.createdAt ? new Date(p.createdAt).toISOString() : undefined,
       })
       recentNames.push(p.name)

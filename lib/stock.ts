@@ -23,11 +23,12 @@ export function buildStockByProductId(
     byProductId[product.id] = product.initialStock ?? 0
   }
 
-  // When branchId is provided, only count transactions for that branch.
-  // Transactions with no branchId (pre-migration) are attributed to whichever branch
-  // is querying — keeps stock correct during the migration window.
+  // When branchId is provided, only count transactions for that branch. Legacy
+  // transactions with no branchId were re-attributed to the origin branch (see
+  // scripts/reattribute-legacy-stock.ts), so a branch's stock is now strictly
+  // its own transactions — a new branch stays a clean slate.
   const relevant = branchId
-    ? transactions.filter((tx) => !tx.branchId || tx.branchId === branchId)
+    ? transactions.filter((tx) => tx.branchId === branchId)
     : transactions
 
   for (const tx of relevant) {
@@ -45,7 +46,7 @@ export function computeStock(
   branchId?: string,
 ): number {
   const relevant = branchId
-    ? transactions.filter((tx) => !tx.branchId || tx.branchId === branchId)
+    ? transactions.filter((tx) => tx.branchId === branchId)
     : transactions
 
   return relevant.reduce((stock, tx) => {

@@ -249,15 +249,15 @@
       "symbols": []
     },
     "app/(ui)/layout.tsx": {
-      "mtime_ms": 1783071786734.5452,
+      "mtime_ms": 1783153481660.1946,
       "symbols": []
     },
     "app/(ui)/pos/page.tsx": {
-      "mtime_ms": 1783151794491.544,
+      "mtime_ms": 1783234951592.6543,
       "symbols": []
     },
     "app/(ui)/products/page.tsx": {
-      "mtime_ms": 1782994890322.1538,
+      "mtime_ms": 1783153443145.724,
       "symbols": []
     },
     "app/(ui)/reports/page.tsx": {
@@ -265,11 +265,11 @@
       "symbols": []
     },
     "app/(ui)/settings/page.tsx": {
-      "mtime_ms": 1783071776463.4023,
+      "mtime_ms": 1783154708361.6216,
       "symbols": []
     },
     "app/(ui)/stock-count/page.tsx": {
-      "mtime_ms": 1782993337408.0798,
+      "mtime_ms": 1783153041746.838,
       "symbols": []
     },
     "app/(ui)/transfers/page.tsx": {
@@ -327,7 +327,7 @@
       ]
     },
     "app/api/cron/daily-report/route.ts": {
-      "mtime_ms": 1782978807014.6084,
+      "mtime_ms": 1783155606864.5652,
       "symbols": [
         "POST"
       ]
@@ -415,7 +415,7 @@
       ]
     },
     "app/api/settings/route.ts": {
-      "mtime_ms": 1782820873641.6804,
+      "mtime_ms": 1783154688941.4094,
       "symbols": [
         "GET",
         "PATCH"
@@ -650,9 +650,10 @@
       ]
     },
     "app/layout.tsx": {
-      "mtime_ms": 1783071715999.5608,
+      "mtime_ms": 1783159278405.3418,
       "symbols": [
-        "metadata"
+        "metadata",
+        "viewport"
       ]
     },
     "app/lib/types.ts": {
@@ -698,7 +699,7 @@
       ]
     },
     "components/pos/CartQtyControl.tsx": {
-      "mtime_ms": 1783151809694.6555,
+      "mtime_ms": 1783162925099.9846,
       "symbols": [
         "CartQtyControl"
       ]
@@ -709,20 +710,8 @@
         "CategoryPicker"
       ]
     },
-    "components/pos/QtyEntryDialog.tsx": {
-      "mtime_ms": 1783151764991.3271,
-      "symbols": [
-        "QtyEntryDialog"
-      ]
-    },
-    "components/pos/QtyNumpad.tsx": {
-      "mtime_ms": 1783151761285.3,
-      "symbols": [
-        "QtyNumpad"
-      ]
-    },
     "components/products/BulkUploadWizard.tsx": {
-      "mtime_ms": 1781774912792.9858,
+      "mtime_ms": 1783153045629.8853,
       "symbols": [
         "BulkUploadWizard"
       ]
@@ -806,7 +795,7 @@
       ]
     },
     "lib/cart-qty.ts": {
-      "mtime_ms": 1783151759440.2864,
+      "mtime_ms": 1783153011218.4666,
       "symbols": [
         "QTY_STEP_PRESETS",
         "parseCartQty",
@@ -1069,7 +1058,7 @@
       ]
     },
     "lib/pdf.ts": {
-      "mtime_ms": 1782820171352.1309,
+      "mtime_ms": 1783154704102.5752,
       "symbols": [
         "printPDF",
         "QuotationItem",
@@ -1112,7 +1101,7 @@
       ]
     },
     "lib/pricing.ts": {
-      "mtime_ms": 1783081773444.578,
+      "mtime_ms": 1783153078296.2825,
       "symbols": [
         "DEFAULT_MIN_MARKUP_PERCENT",
         "effectiveLowestPrice",
@@ -1279,7 +1268,7 @@
       ]
     },
     "lib/settings.ts": {
-      "mtime_ms": 1782820854373.4458,
+      "mtime_ms": 1783154686987.388,
       "symbols": [
         "PosLookupMode",
         "POS_LOOKUP_MODES",
@@ -1412,7 +1401,7 @@
       ]
     },
     "next-env.d.ts": {
-      "mtime_ms": 1782913394780.2454,
+      "mtime_ms": 1783235110493.5652,
       "symbols": []
     },
     "next.config.ts": {
