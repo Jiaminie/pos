@@ -29,6 +29,7 @@ import { effectiveLowestPrice, maxDiscountPerUnit, DEFAULT_MIN_MARKUP_PERCENT } 
 import { fetchSettings, type PosLookupMode } from '@/lib/settings'
 import { fetchMe, getCachedAuthUser, hasPermission, type AuthUser } from '@/lib/auth'
 import { buildStockByProductId, LOW_STOCK_THRESHOLD } from '@/lib/stock'
+import { getMyBranchId } from '@/lib/branch'
 import type { Product, ProductCategory, InventoryTransaction, Unit, TransactionSource } from '@/lib/types'
 
 const emptyForm = {
@@ -639,9 +640,10 @@ function ProductsPageContent() {
 
   const deferredSearch = useDeferredValue(search)
   const nq = normalizeQuery(deferredSearch.trim())
+  const myBranchId = getMyBranchId() ?? undefined
   const stockByProductId = useMemo(
-    () => buildStockByProductId(products, transactions),
-    [products, transactions],
+    () => buildStockByProductId(products, transactions, myBranchId),
+    [products, transactions, myBranchId],
   )
   const missingPriceCount = useMemo(
     () => products.filter((p) => p.costPrice <= 0 || p.sellingPrice <= 0).length,
@@ -656,7 +658,7 @@ function ProductsPageContent() {
   )
 
   const visible = useMemo(() => {
-    const stocks = buildStockByProductId(products, transactions)
+    const stocks = buildStockByProductId(products, transactions, myBranchId)
     const rows = products
       .filter((product) => filterCategoryId === 'all' || product.categoryId === filterCategoryId)
       .filter((product) => filterBrand === 'all' || getProductBrand(product) === filterBrand)
@@ -692,7 +694,7 @@ function ProductsPageContent() {
     }
 
     return rows
-  }, [products, transactions, filterCategoryId, filterBrand, filterMissingPrices, addedFilter, nq, stockFilter, categoryMap, showBarcodeField])
+  }, [products, transactions, myBranchId, filterCategoryId, filterBrand, filterMissingPrices, addedFilter, nq, stockFilter, categoryMap, showBarcodeField])
 
   const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE))
   const paginated = visible.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)

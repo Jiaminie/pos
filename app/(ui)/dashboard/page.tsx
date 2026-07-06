@@ -8,6 +8,7 @@ import { getAll as getProducts } from '@/lib/db/products'
 import { getAll as getIncidents } from '@/lib/db/incidents'
 import { seedIfEmpty, syncFromServer } from '@/lib/db/seed'
 import { buildStockByProductId, LOW_STOCK_THRESHOLD } from '@/lib/stock'
+import { getMyBranchId } from '@/lib/branch'
 import type { InventoryTransaction, Product, Incident } from '@/lib/types'
 
 function dayKey(d: Date) {
@@ -73,9 +74,10 @@ export default function DashboardPage() {
     () => Object.fromEntries(products.map((p) => [p.id, p])),
     [products],
   )
+  const myBranchId = getMyBranchId() ?? undefined
   const stockByProductId = useMemo(
-    () => buildStockByProductId(products, transactions),
-    [products, transactions],
+    () => buildStockByProductId(products, transactions, myBranchId),
+    [products, transactions, myBranchId],
   )
 
   const start = rangeStart(range)

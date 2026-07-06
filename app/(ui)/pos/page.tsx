@@ -241,8 +241,9 @@ export default function POSPage() {
       setProducts(prods)
       setAllTransactions(txs)
 
-      const stockByProductId = buildStockByProductId(prods, txs)
-      const low = getLowStockItems(prods, txs, stockByProductId)
+      const branchId = getMyBranchId() ?? undefined
+      const stockByProductId = buildStockByProductId(prods, txs, branchId)
+      const low = getLowStockItems(prods, txs, stockByProductId, branchId)
       low.forEach(({ product }) => alertedIds.current.add(product.id))
       if (low.length === 1) {
         toast.warning(`Low stock: ${low[0].product.name}`, {
@@ -279,9 +280,10 @@ export default function POSPage() {
 
   const deferredSearch = useDeferredValue(search)
   const nq = normalizeQuery(deferredSearch.trim())
+  const myBranchId = getMyBranchId() ?? undefined
   const stockByProductId = useMemo(
-    () => buildStockByProductId(products, allTransactions),
-    [products, allTransactions],
+    () => buildStockByProductId(products, allTransactions, myBranchId),
+    [products, allTransactions, myBranchId],
   )
   const brands = useMemo(() => getBrandOptions(products), [products])
   const brandCounts = useMemo(() => {
@@ -768,8 +770,8 @@ export default function POSPage() {
     drainSales().catch(() => {})
     drain().catch(() => {})
 
-    const updatedStockByProductId = buildStockByProductId(products, updatedTxs)
-    const nowLow = getLowStockItems(products, updatedTxs, updatedStockByProductId)
+    const updatedStockByProductId = buildStockByProductId(products, updatedTxs, myBranchId)
+    const nowLow = getLowStockItems(products, updatedTxs, updatedStockByProductId, myBranchId)
     const newlyLow = nowLow.filter(({ product }) => !alertedIds.current.has(product.id))
     newlyLow.forEach(({ product }) => alertedIds.current.add(product.id))
 
