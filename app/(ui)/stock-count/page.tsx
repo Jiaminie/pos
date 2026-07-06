@@ -169,10 +169,14 @@ export default function StockCountPage() {
   const [rowEdits, setRowEdits] = useState<Record<string, ExtractedStockCountRow>>({})
   const [editKey, setEditKey] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<EditRowForm>(emptyEditForm)
+  const [manualRows, setManualRows] = useState<{ key: string; row: ExtractedStockCountRow }[]>([])
+  const [manualAddOpen, setManualAddOpen] = useState(false)
+  const [manualAddForm, setManualAddForm] = useState<EditRowForm>(emptyEditForm)
 
   const photoAppliedRef = useRef<Set<string>>(new Set())
   const submittingRef = useRef(false)
   const creatingItemRef = useRef(false)
+  const manualRowSeq = useRef(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Guards the persistence effect below from writing an empty {} over storage
   // before the resume-drafts fetch in loadCatalog has had a chance to hydrate it.
@@ -346,9 +350,33 @@ export default function StockCountPage() {
     [products, transactions, myBranchId],
   )
 
-  const unmatchedRows = useMemo(
+  // Rows the user typed in directly (via "New item") for entries the photo
+  // transcription missed entirely — no upload/image backs these, so they're
+  // kept client-side only and folded into the same review queue below.
+  const manualReviewRows = useMemo<UnmatchedReviewRow[]>(
     () =>
-      buildUnmatchedReviewRows(drafts, products, resolvedByKey)
+      manualRows
+        .filter(({ key }) => !dismissedKeys[key] && !resolvedByKey[key])
+        .map(({ key, row }) => {
+          const edited = rowEdits[key] ?? row
+          const match = matchProduct(edited.description, products)
+          return {
+            key,
+            uploadId: 'manual',
+            imageUrl: '',
+            row: edited,
+            status: match.status,
+            suggestedProductId: match.productId,
+            suggestedProductName: match.productName,
+          }
+        }),
+    [manualRows, dismissedKeys, resolvedByKey, rowEdits, products],
+  )
+
+  const unmatchedRows = useMemo(
+    () => [
+      ...manualReviewRows,
+      ...buildUnmatchedReviewRows(drafts, products, resolvedByKey)
         .filter((row) => !dismissedKeys[row.key])
         .map((row) => {
           const edit = rowEdits[row.key]
@@ -364,13 +392,17 @@ export default function StockCountPage() {
             suggestedProductName: match.productName,
           }
         }),
-    [drafts, products, resolvedByKey, dismissedKeys, rowEdits],
+    ],
+    [drafts, products, resolvedByKey, dismissedKeys, rowEdits, manualReviewRows],
   )
 
   // One entry per source photo that still has rows needing review, in draft order.
+  // Manually-added rows have no photo behind them, so they're excluded here — they
+  // stay visible under "All photos" instead of getting a fake image chip.
   const reviewImageGroups = useMemo(() => {
     const byUpload = new Map<string, { uploadId: string; imageUrl: string; count: number }>()
     for (const row of unmatchedRows) {
+      if (row.uploadId === 'manual') continue
       const existing = byUpload.get(row.uploadId)
       if (existing) existing.count++
       else byUpload.set(row.uploadId, { uploadId: row.uploadId, imageUrl: row.imageUrl, count: 1 })
@@ -658,6 +690,45 @@ export default function StockCountPage() {
     }
     setRowEdits((prev) => ({ ...prev, [item.key]: edited }))
     closeEdit()
+  }
+
+  function openManualAdd() {
+    setOpenPickerKey(null)
+    setNewItemKey(null)
+    setEditKey(null)
+    setManualAddForm(emptyEditForm)
+    setManualAddOpen(true)
+  }
+
+  function closeManualAdd() {
+    setManualAddOpen(false)
+    setManualAddForm(emptyEditForm)
+  }
+
+  // Adds a row for an item the photo transcription missed entirely. It joins the
+  // same review queue as extracted rows — Accept/Link/New item/Skip all apply.
+  function handleAddManualRow() {
+    const description = manualAddForm.description.trim()
+    if (!description) {
+      toast.error('Description is required')
+      return
+    }
+    const qty = parseFloat(manualAddForm.qty)
+    if (Number.isNaN(qty) || qty < 0) {
+      toast.error('Enter a valid quantity')
+      return
+    }
+    const key = `manual:${manualRowSeq.current++}`
+    const row: ExtractedStockCountRow = {
+      description,
+      qty: round2(qty),
+      sizeType: manualAddForm.sizeType.trim() || null,
+      type: null,
+      company: manualAddForm.company.trim() || null,
+    }
+    setManualRows((prev) => [...prev, { key, row }])
+    closeManualAdd()
+    toast.success('Row added — resolve it like any extracted row')
   }
 
   function openNewItem(item: UnmatchedReviewRow) {
@@ -1029,6 +1100,75 @@ export default function StockCountPage() {
     )
   }
 
+  function renderManualAddForm() {
+    const set = (patch: Partial<EditRowForm>) => setManualAddForm((f) => ({ ...f, ...patch }))
+    return (
+      <div className="rounded-lg border border-gray-200 bg-white p-3">
+        <p className="text-xs font-medium text-gray-700 mb-2">
+          Add a row the photo transcription missed
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <label className="text-xs text-gray-500 sm:col-span-2">
+            Description
+            <input
+              type="text"
+              autoFocus
+              value={manualAddForm.description}
+              onChange={(e) => set({ description: e.target.value })}
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+          <label className="text-xs text-gray-500">
+            Quantity
+            <input
+              type="number"
+              inputMode="decimal"
+              step="any"
+              min="0"
+              value={manualAddForm.qty}
+              onChange={(e) => set({ qty: e.target.value })}
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+          <label className="text-xs text-gray-500">
+            Size / type <span className="text-gray-400">(optional)</span>
+            <input
+              type="text"
+              value={manualAddForm.sizeType}
+              onChange={(e) => set({ sizeType: e.target.value })}
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+          <label className="text-xs text-gray-500">
+            Company / brand <span className="text-gray-400">(optional)</span>
+            <input
+              type="text"
+              value={manualAddForm.company}
+              onChange={(e) => set({ company: e.target.value })}
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+        </div>
+        <div className="flex items-center gap-2 mt-3">
+          <button
+            type="button"
+            onClick={handleAddManualRow}
+            className="inline-flex items-center gap-1 rounded-lg bg-blue-600 text-white px-3 py-1.5 text-xs font-medium hover:bg-blue-700"
+          >
+            <PackagePlus size={14} /> Add row
+          </button>
+          <button
+            type="button"
+            onClick={closeManualAdd}
+            className="inline-flex items-center gap-1 rounded-lg border border-gray-300 text-gray-600 px-3 py-1.5 text-xs font-medium hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   function renderReviewRow(item: UnmatchedReviewRow) {
     const pickerOpen = openPickerKey === item.key
     const newItemOpen = newItemKey === item.key
@@ -1038,12 +1178,18 @@ export default function StockCountPage() {
       <Fragment key={item.key}>
         <tr className="hover:bg-gray-50 align-top">
           <td className="px-4 py-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={item.imageUrl}
-              alt=""
-              className="w-9 h-9 rounded object-cover ring-1 ring-gray-200"
-            />
+            {item.imageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={item.imageUrl}
+                alt=""
+                className="w-9 h-9 rounded object-cover ring-1 ring-gray-200"
+              />
+            ) : (
+              <div className="w-9 h-9 rounded bg-blue-50 ring-1 ring-blue-200 flex items-center justify-center text-blue-500">
+                <PackagePlus size={16} />
+              </div>
+            )}
           </td>
           <td className="px-4 py-3">
             <span
@@ -1151,12 +1297,18 @@ export default function StockCountPage() {
     const edited = Boolean(rowEdits[item.key])
     return (
       <div key={item.key} className="p-4 flex gap-3">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={item.imageUrl}
-          alt=""
-          className="w-11 h-11 rounded object-cover ring-1 ring-gray-200 shrink-0"
-        />
+        {item.imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={item.imageUrl}
+            alt=""
+            className="w-11 h-11 rounded object-cover ring-1 ring-gray-200 shrink-0"
+          />
+        ) : (
+          <div className="w-11 h-11 rounded bg-blue-50 ring-1 ring-blue-200 flex items-center justify-center text-blue-500 shrink-0">
+            <PackagePlus size={18} />
+          </div>
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2 mb-1">
             <span
@@ -1442,14 +1594,13 @@ export default function StockCountPage() {
           )}
         </div>
 
-        {unmatchedRows.length > 0 && (
-          <div className="mb-5 rounded-xl border border-gray-200 overflow-hidden">
+        <div className="mb-5 rounded-xl border border-gray-200 overflow-hidden">
             <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
               <h2 className="text-sm font-semibold text-gray-900">Extracted rows needing review</h2>
               <p className="text-xs text-gray-500 mt-0.5">
                 Resolve unmatched or low-confidence rows before submitting
               </p>
-              <div className="flex flex-wrap gap-1 mt-3">
+              <div className="flex flex-wrap items-center gap-1 mt-3">
                 {(['all', 'needs_review', 'unmatched'] as ReviewFilter[]).map((f) => (
                   <button
                     key={f}
@@ -1472,7 +1623,21 @@ export default function StockCountPage() {
                     )}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => (manualAddOpen ? closeManualAdd() : openManualAdd())}
+                  className={`ml-1 inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                    manualAddOpen
+                      ? 'border-blue-300 bg-blue-50 text-blue-700'
+                      : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                  }`}
+                  title="Add a row for an item the photo transcription missed entirely"
+                >
+                  <PackagePlus size={14} /> New item
+                </button>
               </div>
+
+              {manualAddOpen && <div className="mt-3 max-w-2xl">{renderManualAddForm()}</div>}
 
               {reviewImageGroups.length > 1 && (
                 <div className="flex flex-wrap items-center gap-1.5 mt-3">
@@ -1545,8 +1710,7 @@ export default function StockCountPage() {
                 </div>
               </>
             )}
-          </div>
-        )}
+        </div>
           </>
         )}
 
