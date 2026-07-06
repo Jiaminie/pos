@@ -8,11 +8,14 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  Download,
+  FileText,
   ImagePlus,
   Loader2,
   Link2,
   PackagePlus,
   Pencil,
+  Printer,
   Search,
   SkipForward,
   Trash2,
@@ -23,6 +26,7 @@ import { BrandPicker } from '@/components/pos/BrandPicker'
 import { CategoryPicker } from '@/components/pos/CategoryPicker'
 import { getMyBranchId } from '@/lib/branch'
 import { getBrandOptions, getProductBrand, matchesProductSearch } from '@/lib/brands'
+import { getById as getBranchById } from '@/lib/db/branches'
 import { getAll as getCategories } from '@/lib/db/categories'
 import { getAll as getProducts } from '@/lib/db/products'
 import { createMany as createManyTx, getAll as getTransactions } from '@/lib/db/transactions'
@@ -50,6 +54,8 @@ import { createStockCountProduct } from '@/lib/stock-count/newProduct'
 import type {
   ExtractedStockCountRow,
   ReviewFilter,
+  StockCountReport,
+  StockCountReportRow,
   StockCountUpload,
   UnmatchedReviewRow,
 } from '@/lib/stock-count/types'
@@ -172,6 +178,10 @@ export default function StockCountPage() {
   const [manualRows, setManualRows] = useState<{ key: string; row: ExtractedStockCountRow }[]>([])
   const [manualAddOpen, setManualAddOpen] = useState(false)
   const [manualAddForm, setManualAddForm] = useState<EditRowForm>(emptyEditForm)
+  const [lastReport, setLastReport] = useState<StockCountReport | null>(null)
+  const [reportOpen, setReportOpen] = useState(false)
+  const [exportingReport, setExportingReport] = useState(false)
+  const [reportBranchName, setReportBranchName] = useState<string | null>(null)
 
   const photoAppliedRef = useRef<Set<string>>(new Set())
   const submittingRef = useRef(false)
@@ -817,6 +827,26 @@ export default function StockCountPage() {
       return
     }
 
+    // Snapshot every counted product — including exact matches, which never
+    // produce an adjustment transaction — before stockByProductId shifts to
+    // post-submission values below. This is what the report is built from.
+    const reportRows: StockCountReportRow[] = []
+    for (const product of products) {
+      const raw = countedQtys[product.id]?.trim()
+      if (!raw) continue
+      const counted = parseFloat(raw)
+      if (Number.isNaN(counted)) continue
+      const expected = stockByProductId[product.id] ?? product.initialStock ?? 0
+      reportRows.push({
+        productId: product.id,
+        name: product.name,
+        sku: product.sku,
+        expected,
+        counted: round2(counted),
+        delta: round2(counted - expected),
+      })
+    }
+
     submittingRef.current = true
     setSubmitting(true)
     try {
@@ -875,11 +905,52 @@ export default function StockCountPage() {
       toast.success('Stock count submitted', {
         description: `${txs.length} adjustment${txs.length === 1 ? '' : 's'} recorded`,
       })
+      setLastReport({
+        submittedAt: txs[0]?.createdAt ?? new Date().toISOString(),
+        branchId,
+        rows: reportRows,
+      })
+      setReportOpen(true)
+      void getBranchById(branchId).then((b) => setReportBranchName(b?.name ?? null))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Submit failed')
     } finally {
       submittingRef.current = false
       setSubmitting(false)
+    }
+  }
+
+  function exportReportCsv(report: StockCountReport) {
+    const header = 'Product,SKU,Expected,Counted,Variance,Status'
+    const lines = report.rows.map((r) => {
+      const status = r.delta === 0 ? 'Match' : r.delta < 0 ? 'Short' : 'Over'
+      return `"${r.name}","${r.sku}",${r.expected},${r.counted},${r.delta},${status}`
+    })
+    const blob = new Blob([[header, ...lines].join('\n')], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `stock-count-report-${report.submittedAt.slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function exportReportPDF(report: StockCountReport) {
+    setExportingReport(true)
+    try {
+      const { generateStockCountReportPDF } = await import('@/lib/pdf')
+      const doc = generateStockCountReportPDF({
+        branchName: reportBranchName ?? 'This branch',
+        submittedAt: new Date(report.submittedAt).toLocaleString(),
+        submittedBy: authUser?.name,
+        rows: report.rows,
+      })
+      doc.save(`stock-count-report-${report.submittedAt.slice(0, 10)}.pdf`)
+      toast.success('Report downloaded as PDF')
+    } catch {
+      toast.error('Failed to generate PDF')
+    } finally {
+      setExportingReport(false)
     }
   }
 
@@ -1401,6 +1472,177 @@ export default function StockCountPage() {
     )
   }
 
+  function renderReportModal() {
+    if (!lastReport) return null
+    const matched = lastReport.rows.filter((r) => r.delta === 0)
+    const short = lastReport.rows.filter((r) => r.delta < 0)
+    const over = lastReport.rows.filter((r) => r.delta > 0)
+    const netVariance = round2(lastReport.rows.reduce((s, r) => s + r.delta, 0))
+    const sorted = [...lastReport.rows].sort((a, b) => a.delta - b.delta)
+
+    return (
+      <div
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) setReportOpen(false)
+        }}
+      >
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Stock Count Report</h2>
+              <p className="text-sm text-gray-500 mt-0.5">
+                {reportBranchName ?? 'This branch'} ·{' '}
+                {new Date(lastReport.submittedAt).toLocaleString()}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setReportOpen(false)}
+              className="p-1.5 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+            >
+              <X size={20} />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-6 py-5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+              <div className="rounded-xl border border-gray-200 px-4 py-3">
+                <p className="text-[11px] uppercase tracking-wide text-gray-500">Items counted</p>
+                <p className="text-2xl font-semibold text-gray-900 tabular-nums mt-1">
+                  {lastReport.rows.length}
+                </p>
+              </div>
+              <div className="rounded-xl border border-gray-200 px-4 py-3">
+                <p className="text-[11px] uppercase tracking-wide text-gray-500">Matched</p>
+                <p className="text-2xl font-semibold text-gray-900 tabular-nums mt-1">
+                  {matched.length}
+                </p>
+              </div>
+              <div className="rounded-xl border border-gray-200 px-4 py-3">
+                <p className="text-[11px] uppercase tracking-wide text-gray-500">Short</p>
+                <p className="text-2xl font-semibold text-red-600 tabular-nums mt-1">
+                  {short.length}
+                </p>
+              </div>
+              <div className="rounded-xl border border-gray-200 px-4 py-3">
+                <p className="text-[11px] uppercase tracking-wide text-gray-500">Over</p>
+                <p className="text-2xl font-semibold text-green-600 tabular-nums mt-1">
+                  {over.length}
+                </p>
+              </div>
+            </div>
+
+            <div className="border border-gray-200 rounded-xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+                    <tr>
+                      <th className="text-left px-4 py-2.5">Product</th>
+                      <th className="text-right px-4 py-2.5">Expected</th>
+                      <th className="text-right px-4 py-2.5">Counted</th>
+                      <th className="text-right px-4 py-2.5">Variance</th>
+                      <th className="text-left px-4 py-2.5">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {sorted.map((r) => (
+                      <tr key={r.productId} className="hover:bg-gray-50">
+                        <td className="px-4 py-2.5">
+                          <p className="font-medium text-gray-900">{r.name}</p>
+                          <p className="text-xs text-gray-500">{r.sku}</p>
+                        </td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-gray-700">
+                          {r.expected}
+                        </td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-gray-700">
+                          {r.counted}
+                        </td>
+                        <td
+                          className={`px-4 py-2.5 text-right tabular-nums font-medium ${
+                            r.delta > 0
+                              ? 'text-green-600'
+                              : r.delta < 0
+                                ? 'text-red-600'
+                                : 'text-gray-500'
+                          }`}
+                        >
+                          {formatDelta(r.delta)}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <span
+                            className={`inline-block text-[10px] font-medium uppercase tracking-wide px-2 py-0.5 rounded-full ${
+                              r.delta === 0
+                                ? 'bg-gray-100 text-gray-600'
+                                : r.delta < 0
+                                  ? 'bg-red-100 text-red-800'
+                                  : 'bg-green-100 text-green-800'
+                            }`}
+                          >
+                            {r.delta === 0 ? 'Match' : r.delta < 0 ? 'Short' : 'Over'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-500 mt-3">
+              Net variance:{' '}
+              <span
+                className={`font-medium tabular-nums ${
+                  netVariance > 0 ? 'text-green-600' : netVariance < 0 ? 'text-red-600' : 'text-gray-600'
+                }`}
+              >
+                {formatDelta(netVariance)}
+              </span>{' '}
+              units across {lastReport.rows.length} counted item{lastReport.rows.length === 1 ? '' : 's'}.
+            </p>
+          </div>
+
+          <div className="px-6 py-4 border-t border-gray-200 flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => exportReportCsv(lastReport)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 text-gray-700 px-3 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
+            >
+              <Download size={15} /> CSV
+            </button>
+            <button
+              type="button"
+              disabled={exportingReport}
+              onClick={() => void exportReportPDF(lastReport)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 text-gray-700 px-3 py-2 text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              {exportingReport ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : (
+                <FileText size={15} />
+              )}
+              PDF
+            </button>
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 text-gray-700 px-3 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
+            >
+              <Printer size={15} /> Print
+            </button>
+            <button
+              type="button"
+              onClick={() => setReportOpen(false)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 text-white px-4 py-2 text-sm font-medium hover:bg-blue-700 transition-colors"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   if (!authChecked || loading) {
     return (
       <div className="flex-1 flex items-center justify-center text-sm text-gray-400">
@@ -1434,28 +1676,40 @@ export default function StockCountPage() {
               Type counts directly or upload handwritten form photos
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => void handleSubmit()}
-            disabled={submitting || pendingAdjustments.length === 0}
-            className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm w-full md:w-auto"
-          >
-            {submitting ? (
-              <>
-                <Loader2 size={16} className="animate-spin" />
-                Submitting…
-              </>
-            ) : (
-              <>
-                Submit count
-                {pendingAdjustments.length > 0 && (
-                  <span className="bg-white/20 rounded-full px-2 py-0.5 text-xs">
-                    {pendingAdjustments.length}
-                  </span>
-                )}
-              </>
+          <div className="flex flex-col gap-2 sm:flex-row w-full md:w-auto">
+            {lastReport && (
+              <button
+                type="button"
+                onClick={() => setReportOpen(true)}
+                className="inline-flex items-center justify-center gap-2 border border-gray-300 bg-white text-gray-800 px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors w-full sm:w-auto"
+              >
+                <FileText size={16} />
+                View report
+              </button>
             )}
-          </button>
+            <button
+              type="button"
+              onClick={() => void handleSubmit()}
+              disabled={submitting || pendingAdjustments.length === 0}
+              className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm w-full sm:w-auto"
+            >
+              {submitting ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  Submitting…
+                </>
+              ) : (
+                <>
+                  Submit count
+                  {pendingAdjustments.length > 0 && (
+                    <span className="bg-white/20 rounded-full px-2 py-0.5 text-xs">
+                      {pendingAdjustments.length}
+                    </span>
+                  )}
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
         {pendingAdjustments.length > 0 && (
@@ -2001,6 +2255,7 @@ export default function StockCountPage() {
           </>
         )}
       </div>
+      {reportOpen && renderReportModal()}
     </div>
   )
 }

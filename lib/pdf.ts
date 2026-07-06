@@ -846,3 +846,85 @@ export function generateCOBReportPDF(data: COBReportData, settingsOverride?: PDF
   addFooters(doc, settings)
   return doc
 }
+
+// ─── Stock Count Report ────────────────────────────────────────────────────────
+
+export interface StockCountReportRow {
+  name: string
+  sku: string
+  expected: number
+  counted: number
+  delta: number
+}
+
+export interface StockCountReportData {
+  branchName: string
+  submittedAt: string
+  submittedBy?: string
+  rows: StockCountReportRow[]
+}
+
+export function generateStockCountReportPDF(
+  data: StockCountReportData,
+  settingsOverride?: PDFSettings,
+): jsPDF {
+  const settings = settingsOverride ?? loadSettings()
+  const primary  = hexToRgb(settings.primaryColor)
+  const doc      = new jsPDF({ unit: 'mm', format: 'a4' })
+
+  const subtitle = `Stock Count Report • ${data.branchName} • ${data.submittedAt}` +
+    (data.submittedBy ? ` • ${data.submittedBy}` : '')
+  let y = drawHeader(doc, settings.companyName, subtitle, settings)
+
+  const matched = data.rows.filter((r) => r.delta === 0)
+  const short   = data.rows.filter((r) => r.delta < 0)
+  const over    = data.rows.filter((r) => r.delta > 0)
+  const netVariance = data.rows.reduce((s, r) => s + r.delta, 0)
+
+  y = drawSectionHeader(doc, 'Summary', y, primary)
+  y = drawKPIRow(doc, [
+    { label: 'Items Counted', value: String(data.rows.length) },
+    { label: 'Matched',       value: String(matched.length) },
+    { label: 'Short',         value: String(short.length) },
+    { label: 'Over',          value: String(over.length) },
+  ], y)
+  y += 6
+
+  y = drawSectionHeader(doc, 'Counted Items', y, primary)
+  const green: RGB = [21, 128, 61]
+  const red: RGB   = [185, 28, 28]
+
+  autoTable(doc, {
+    startY: y,
+    head: [['Product', 'SKU', 'Expected', 'Counted', 'Variance', 'Status']],
+    body: data.rows.map((r) => {
+      const color = r.delta === 0 ? GRAY_TXT : r.delta < 0 ? red : green
+      const status = r.delta === 0 ? 'Match' : r.delta < 0 ? 'Short' : 'Over'
+      return [
+        r.name,
+        r.sku,
+        String(r.expected),
+        String(r.counted),
+        {
+          content: (r.delta > 0 ? '+' : '') + String(r.delta),
+          styles: { textColor: color, fontStyle: 'bold' as const },
+        },
+        { content: status, styles: { textColor: color } },
+      ]
+    }),
+    headStyles: { fillColor: primary, textColor: WHITE, fontSize: 8 },
+    bodyStyles: { fontSize: 8 },
+    columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
+    alternateRowStyles: { fillColor: [249, 250, 251] },
+    margin: { left: MARGIN, right: MARGIN },
+  })
+
+  const finalY = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(9)
+  doc.setTextColor(...DARK)
+  doc.text(`Net variance: ${netVariance > 0 ? '+' : ''}${netVariance} units`, MARGIN, finalY)
+
+  addFooters(doc, settings)
+  return doc
+}

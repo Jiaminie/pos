@@ -51,3 +51,18 @@ export type UnmatchedReviewRow = {
 }
 
 export type ReviewFilter = 'all' | 'matched' | 'needs_review' | 'unmatched'
+
+export type StockCountReportRow = {
+  productId: string
+  name: string
+  sku: string
+  expected: number
+  counted: number
+  delta: number
+}
+
+export type StockCountReport = {
+  submittedAt: string
+  branchId: string
+  rows: StockCountReportRow[]
+}
