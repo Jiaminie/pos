@@ -758,10 +758,15 @@ export default function StockCountPage() {
       toast.error('Product name is required')
       return
     }
-    const sellingPrice = parseFloat(newItemForm.sellingPrice)
-    if (Number.isNaN(sellingPrice) || sellingPrice < 0) {
-      toast.error('Enter a selling price')
-      return
+    // Selling price is often unknown mid-count — default to 0 and let it be
+    // set properly later from the Products page rather than blocking the count.
+    let sellingPrice = 0
+    if (newItemForm.sellingPrice.trim()) {
+      sellingPrice = parseFloat(newItemForm.sellingPrice)
+      if (Number.isNaN(sellingPrice) || sellingPrice < 0) {
+        toast.error('Selling price is not a valid number')
+        return
+      }
     }
     // Only include cost when the user is allowed to set it (otherwise the field
     // is hidden and the server defaults the stored cost to 0).
@@ -957,7 +962,7 @@ export default function StockCountPage() {
             />
           </label>
           <label className="text-xs text-gray-500">
-            Selling price <span className="text-red-500">*</span>
+            Selling price <span className="text-gray-400">(optional, set later)</span>
             <input
               type="number"
               inputMode="decimal"
