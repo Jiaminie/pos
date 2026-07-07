@@ -10,7 +10,7 @@ export async function GET() {
     const units = await prisma.unit.findMany({ orderBy: { code: 'asc' } })
     return Response.json(
       { data: units, error: null },
-      { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' } },
+      { headers: { 'Cache-Control': 'no-store' } },
     )
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'

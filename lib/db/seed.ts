@@ -294,6 +294,18 @@ export async function replaceCatalogFromServer(
     localStorage.removeItem(SYNC_TS_KEY)
   }
 
+  // This replaces (clears + repopulates) the local catalog from the server, so
+  // any product created locally but not yet pushed would be wiped. Flush the
+  // pending product-create/update queue first so those items exist server-side
+  // and come back in the fetch below instead of vanishing.
+  try {
+    const { drain: drainProductSync } = await import('./productSyncQueue')
+    await drainProductSync()
+  } catch {
+    // Best effort — a failed/partial drain just means those items stay queued
+    // and re-sync later; the merge path never deletes them.
+  }
+
   const started = Date.now()
   const elapsed = () => Date.now() - started
 

@@ -72,9 +72,15 @@ export async function GET(request: NextRequest) {
         ? await prisma.product.count({ where })
         : undefined;
 
+    // Per-organization, mutation-sensitive data — must NOT be edge-cached.
+    // A `public` s-maxage response is stored by the CDN keyed on the URL alone
+    // (ignoring the auth cookie), so a catalog sync right after creating a
+    // product would fetch a stale list missing it, and the client's
+    // replace-from-server would then wipe the just-added product locally.
+    // (It also risks serving one org's catalog to another.)
     return Response.json(
       { data: page, meta: { nextCursor, hasMore, total }, error: null },
-      { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300' } }
+      { headers: { 'Cache-Control': 'no-store' } }
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

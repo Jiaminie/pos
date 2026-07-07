@@ -16,7 +16,7 @@ export async function GET() {
     const categories = rows.map((r) => r.category as string);
     return Response.json(
       { data: { categories }, error: null },
-      { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300' } }
+      { headers: { 'Cache-Control': 'no-store' } }
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
