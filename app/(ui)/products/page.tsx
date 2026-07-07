@@ -266,6 +266,7 @@ function ProductsPageContent() {
         quantity: q,
         source,
         createdAt: new Date().toISOString(),
+        ...(myBranchId ? { branchId: myBranchId } : {}),
       }
       await createManyTx([tx])
       await pushManyTx([tx])
@@ -539,6 +540,7 @@ function ProductsPageContent() {
             quantity: addQty,
             source: form.restockSource,
             createdAt: new Date().toISOString(),
+            ...(myBranchId ? { branchId: myBranchId } : {}),
           }
           await createManyTx([tx])
           await pushManyTx([tx])
@@ -579,6 +581,7 @@ function ProductsPageContent() {
             quantity: openingQty,
             source: 'SUPPLIER',
             createdAt: new Date().toISOString(),
+            ...(myBranchId ? { branchId: myBranchId } : {}),
           }
           await createManyTx([tx])
           await pushManyTx([tx])
