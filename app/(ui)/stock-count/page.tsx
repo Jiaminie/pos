@@ -15,6 +15,7 @@ import {
   Link2,
   PackagePlus,
   Pencil,
+  Plus,
   Printer,
   Search,
   SkipForward,
@@ -1892,7 +1893,7 @@ export default function StockCountPage() {
                   }`}
                   title="Add a row for an item the photo transcription missed entirely"
                 >
-                  <PackagePlus size={14} /> New item
+                  <Plus size={14} /> Add missing row
                 </button>
               </div>
 
