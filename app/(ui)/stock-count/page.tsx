@@ -1,8 +1,10 @@
 'use client'
 
 import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
 import {
   AlertTriangle,
+  CalendarDays,
   Camera,
   Check,
   ChevronLeft,
@@ -1678,6 +1680,13 @@ export default function StockCountPage() {
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row w-full md:w-auto">
+            <Link
+              href="/stock-count/history"
+              className="inline-flex items-center justify-center gap-2 border border-gray-300 bg-white text-gray-800 px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors w-full sm:w-auto"
+            >
+              <CalendarDays size={16} />
+              History
+            </Link>
             {lastReport && (
               <button
                 type="button"
