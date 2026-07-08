@@ -334,7 +334,7 @@ export default function SettingsPage() {
       const doc = generateReceiptPDF({
         orderId: 'PREVIEW-0001',
         total: 3480,
-        date: new Date().toLocaleDateString('en-KE', { year: 'numeric', month: 'long', day: 'numeric' }),
+        date: new Date().toLocaleString('en-KE', { year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
         items: [
           { name: 'Pelikan Stamp Pad without ink', sku: 'ST-100', qty: 1, unitPrice: 100 },
           { name: 'Centrum File Index notes', sku: 'ST-200', qty: 2, unitPrice: 200 },

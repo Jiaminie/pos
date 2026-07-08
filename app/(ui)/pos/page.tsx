@@ -810,7 +810,7 @@ export default function POSPage() {
     return generateReceiptPDF({
       orderId: receipt.orderId,
       total: receipt.totals.grandTotal,
-      date: new Date().toLocaleDateString('en-KE', { year: 'numeric', month: 'long', day: 'numeric' }),
+      date: new Date().toLocaleString('en-KE', { year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
       items: receipt.items.map((i) => ({
         name: i.name,
         sku: i.sku,
@@ -847,7 +847,7 @@ export default function POSPage() {
         customerPhone: quoteForm.customerPhone || undefined,
         note: quoteForm.note || undefined,
         quoteRef,
-        date: new Date().toLocaleDateString('en-KE', { year: 'numeric', month: 'long', day: 'numeric' }),
+        date: new Date().toLocaleString('en-KE', { year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
         // Use negotiated unitPrice (not sellingPrice) in the quote
         items: cart.map((i) => ({
           name: i.name,

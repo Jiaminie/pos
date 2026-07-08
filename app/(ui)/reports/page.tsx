@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ArrowDownToLine, BarChart3, CalendarRange, ChevronDown, ChevronLeft, ChevronRight, Download, FileText, Package, Percent, Search, TrendingUp, X } from 'lucide-react'
+import { ArrowDownToLine, BarChart3, CalendarRange, ChevronDown, ChevronLeft, ChevronRight, Download, FileText, Package, Percent, Printer, Receipt, Search, TrendingUp, X } from 'lucide-react'
 import { BrandPicker } from '@/components/pos/BrandPicker'
 import { CategoryPicker } from '@/components/pos/CategoryPicker'
 import { toast } from 'sonner'
@@ -10,6 +10,7 @@ import { getAll as getTransactions } from '@/lib/db/transactions'
 import { getAll as getProducts } from '@/lib/db/products'
 import { getAll as getCategories } from '@/lib/db/categories'
 import { getAll as getIncidents } from '@/lib/db/incidents'
+import { getAll as getSales, type Sale } from '@/lib/db/sales'
 import { seedIfEmpty, syncFromServer } from '@/lib/db/seed'
 import { buildStockByProductId, getLowStockItems, LOW_STOCK_THRESHOLD } from '@/lib/stock'
 import { getBrandOptions, getProductBrand, matchesProductSearch } from '@/lib/brands'
@@ -147,27 +148,34 @@ export default function ReportsPage() {
     discountedLines: Array<{ saleId: string; createdAt: string; cashierName: string; productName: string; lineDiscount: number }>
   } | null>(null)
   const [posLookupMode, setPosLookupMode] = useState<PosLookupMode>('catalog')
+  const [saleRecords, setSaleRecords] = useState<Sale[]>([])
+  const [receiptsOpen, setReceiptsOpen] = useState(false)
+  const [receiptSearch, setReceiptSearch] = useState('')
+  const [receiptPage, setReceiptPage] = useState(1)
   const myBranchId = getMyBranchId()
   const PAGE_SIZE = 25
+  const RECEIPTS_PAGE_SIZE = 15
   const LOW_STOCK_PREVIEW = 10
 
   async function refreshLocal() {
-    const [txs, prods, cats, incs] = await Promise.all([getTransactions(), getProducts(), getCategories(), getIncidents()])
+    const [txs, prods, cats, incs, sls] = await Promise.all([getTransactions(), getProducts(), getCategories(), getIncidents(), getSales()])
     setTransactions(txs)
     setProducts(prods)
     setCategories(cats)
     setIncidents(incs)
+    setSaleRecords(sls)
     setLoading(false)
   }
 
   useEffect(() => {
     async function load() {
-      const [txs, prods, cats, incs] = await Promise.all([getTransactions(), getProducts(), getCategories(), getIncidents()])
+      const [txs, prods, cats, incs, sls] = await Promise.all([getTransactions(), getProducts(), getCategories(), getIncidents(), getSales()])
       if (prods.length > 0) {
         setTransactions(txs)
         setProducts(prods)
         setCategories(cats)
         setIncidents(incs)
+        setSaleRecords(sls)
         setLoading(false)
       } else {
         await seedIfEmpty()
@@ -413,6 +421,83 @@ export default function ReportsPage() {
     s.reasons[inc.reason] = (s.reasons[inc.reason] ?? 0) + 1
   }
   const heatspots = [...incidentMap.values()].sort((a, b) => b.count - a.count)
+
+  // ── Receipts ────────────────────────────────────────────────────────────────
+  // Reconstruct past sales so any receipt can be reprinted. SALE lines are
+  // grouped by saleId (covering sales synced from every device); the local sales
+  // store — when it holds the record this device rang up — supplies the
+  // authoritative total (which reflects any whole-cart discount the lines alone
+  // don't capture). A void reverses stock with a RETURN that sync remaps to a
+  // STOCK_IN (see lib/db/seed.ts); since only those reversals carry a saleId, a
+  // STOCK_IN tied to a saleId marks that sale as voided.
+  const saleRecordMap = new Map(saleRecords.map((s) => [s.id, s]))
+  const voidedSaleIds = new Set<string>()
+  for (const tx of branchTransactions) {
+    if (tx.type === 'STOCK_IN' && tx.saleId) voidedSaleIds.add(tx.saleId)
+  }
+
+  type ReceiptLine = { name: string; sku?: string; qty: number; unitPrice: number }
+  const receiptGroups = new Map<string, { id: string; createdAt: string; lines: ReceiptLine[] }>()
+  for (const tx of filtered) {
+    if (tx.type !== 'SALE') continue
+    const sid = tx.saleId ?? tx.orderId
+    if (!sid) continue
+    const g = receiptGroups.get(sid) ?? { id: sid, createdAt: tx.createdAt, lines: [] }
+    if (tx.createdAt < g.createdAt) g.createdAt = tx.createdAt
+    const p = productMap[tx.productId]
+    g.lines.push({
+      name: p?.name ?? tx.productId,
+      sku: p?.sku,
+      qty: tx.quantity,
+      unitPrice: tx.unitPrice ?? p?.sellingPrice ?? 0,
+    })
+    receiptGroups.set(sid, g)
+  }
+
+  const rq = normalizeQuery(receiptSearch.trim())
+  const allReceipts = [...receiptGroups.values()]
+    .map((g) => {
+      const rec = saleRecordMap.get(g.id)
+      const lineTotal = round2(g.lines.reduce((s, l) => s + l.unitPrice * l.qty, 0))
+      return {
+        id: g.id,
+        createdAt: g.createdAt,
+        lines: g.lines,
+        itemCount: round2(g.lines.reduce((s, l) => s + l.qty, 0)),
+        total: rec ? rec.total : lineTotal,
+        voided: voidedSaleIds.has(g.id),
+      }
+    })
+    .filter((r) => {
+      if (!rq) return true
+      if (r.id.toLowerCase().includes(rq)) return true
+      return r.lines.some((l) => normalizeQuery(l.name).includes(rq) || (l.sku ? normalizeQuery(l.sku).includes(rq) : false))
+    })
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+
+  const receiptPageCount = Math.max(1, Math.ceil(allReceipts.length / RECEIPTS_PAGE_SIZE))
+  const paginatedReceipts = allReceipts.slice((receiptPage - 1) * RECEIPTS_PAGE_SIZE, receiptPage * RECEIPTS_PAGE_SIZE)
+
+  async function reprintReceipt(
+    r: { id: string; createdAt: string; total: number; lines: ReceiptLine[] },
+    mode: 'print' | 'save',
+  ) {
+    try {
+      const { generateReceiptPDF, printPDF } = await import('@/lib/pdf')
+      const doc = generateReceiptPDF({
+        orderId: r.id,
+        total: r.total,
+        date: new Date(r.createdAt).toLocaleString('en-KE', {
+          year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit',
+        }),
+        items: r.lines.map((l) => ({ name: l.name, sku: l.sku, qty: l.qty, unitPrice: l.unitPrice })),
+      })
+      if (mode === 'print') printPDF(doc)
+      else doc.save(`receipt-${r.id.slice(0, 8)}.pdf`)
+    } catch {
+      toast.error('Failed to generate receipt')
+    }
+  }
 
   function exportCsv() {
     const header = 'Type,Product,SKU,Category,Sold,Stocked,List Revenue,Actual Revenue,Discount,Net Stock'
@@ -780,6 +865,94 @@ export default function ReportsPage() {
                         <span className="text-amber-600 shrink-0">−{Math.round(line.lineDiscount).toLocaleString()}</span>
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Receipts — look up & reprint a past sale */}
+      {(allReceipts.length > 0 || receiptSearch) && (
+        <div className="mb-4 border border-gray-200 rounded-xl overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setReceiptsOpen((o) => !o)}
+            className="w-full flex items-center gap-2 px-4 py-3 text-left bg-white hover:bg-gray-50 transition-colors"
+          >
+            <ChevronDown size={16} className={`text-gray-500 shrink-0 transition-transform ${receiptsOpen ? 'rotate-180' : ''}`} />
+            <Receipt size={15} className="text-blue-600 shrink-0" />
+            <span className="text-sm font-semibold text-gray-800 flex-1">Receipts</span>
+            <span className="text-xs text-gray-400 shrink-0">
+              {allReceipts.length} sale{allReceipts.length === 1 ? '' : 's'} · {rangeLabel}
+            </span>
+          </button>
+
+          {receiptsOpen && (
+            <div className="border-t border-gray-100">
+              <div className="p-3 border-b border-gray-100 bg-gray-50">
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={receiptSearch}
+                    onChange={(e) => { setReceiptSearch(e.target.value); setReceiptPage(1) }}
+                    placeholder="Search by order number or product…"
+                    className="w-full border border-gray-200 rounded-lg pl-9 pr-9 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  />
+                  {receiptSearch && (
+                    <button onClick={() => { setReceiptSearch(''); setReceiptPage(1) }} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {paginatedReceipts.length === 0 ? (
+                <p className="px-4 py-6 text-sm text-gray-400 text-center">No receipts match your search.</p>
+              ) : (
+                <ul className="divide-y divide-gray-100">
+                  {paginatedReceipts.map((r) => (
+                    <li key={r.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium text-gray-800">
+                            {new Date(r.createdAt).toLocaleString('en-KE', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                          </p>
+                          {r.voided && (
+                            <span className="text-[10px] font-semibold uppercase tracking-wide text-red-700 bg-red-100 px-1.5 py-0.5 rounded">Voided</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-400 font-mono truncate">#{r.id.slice(0, 8)} · {r.itemCount} item{r.itemCount === 1 ? '' : 's'}</p>
+                      </div>
+                      <p className="text-sm font-semibold text-gray-700 shrink-0 tabular-nums">KSh {r.total.toLocaleString()}</p>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button onClick={() => reprintReceipt(r, 'print')} title="Print receipt" className="p-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100">
+                          <Printer size={15} />
+                        </button>
+                        <button onClick={() => reprintReceipt(r, 'save')} title="Download PDF" className="p-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100">
+                          <Download size={15} />
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {receiptPageCount > 1 && (
+                <div className="flex items-center justify-between px-4 py-2 border-t border-gray-100">
+                  <p className="text-xs text-gray-500">
+                    Showing {(receiptPage - 1) * RECEIPTS_PAGE_SIZE + 1}–{Math.min(receiptPage * RECEIPTS_PAGE_SIZE, allReceipts.length)} of {allReceipts.length}
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setReceiptPage((p) => p - 1)} disabled={receiptPage === 1} className="p-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40">
+                      <ChevronLeft size={15} />
+                    </button>
+                    <span className="text-xs text-gray-500 px-2 tabular-nums">{receiptPage} / {receiptPageCount}</span>
+                    <button onClick={() => setReceiptPage((p) => p + 1)} disabled={receiptPage === receiptPageCount} className="p-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40">
+                      <ChevronRight size={15} />
+                    </button>
                   </div>
                 </div>
               )}

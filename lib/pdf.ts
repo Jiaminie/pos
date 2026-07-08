@@ -258,7 +258,7 @@ export function generateQuotationPDF(data: QuotationData): jsPDF {
   const units   = data.items.reduce((s, i) => s + i.qty, 0)
   y = drawSectionHeader(doc, 'Summary', y, primary)
   y = drawKPIRow(doc, [
-    { label: 'Date',       value: data.date },
+    { label: 'Date & Time', value: data.date },
     { label: 'Total Items', value: String(units) },
     { label: `Total (${cur})`, value: `${cur} ${total.toLocaleString()}` },
   ], y)
@@ -400,7 +400,7 @@ function drawThermal(doc: jsPDF, data: ThermalDoc, settings: PDFSettings, width:
     y += 3.8
   }
   meta(`${data.refLabel}:`, data.refValue)
-  meta('Date:', data.date)
+  meta('Date & Time:', data.date)
   if (data.customerName) meta('Customer:', data.customerName)
   if (data.customerPhone) meta('Phone:', data.customerPhone)
   rule()
@@ -532,7 +532,7 @@ export function generateReceiptPDF(data: ReceiptData): jsPDF {
   const units = data.items.reduce((s, i) => s + i.qty, 0)
   y = drawSectionHeader(doc, 'Summary', y, primary)
   y = drawKPIRow(doc, [
-    { label: 'Date',           value: data.date },
+    { label: 'Date & Time',    value: data.date },
     { label: 'Total Items',    value: String(units) },
     { label: `Total (${cur})`, value: `${cur} ${data.total.toLocaleString()}` },
   ], y)
