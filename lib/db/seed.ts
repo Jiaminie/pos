@@ -204,6 +204,9 @@ async function fetchCatalogFromServer(
         type,
         quantity: Number(t.quantity),
         unitPrice: t.unitPrice != null ? Number(t.unitPrice) : undefined,
+        // Groups a sale's lines back into one receipt, and — on a STOCK_IN
+        // remapped from a RETURN above — marks that sale as voided.
+        saleId: t.saleId ?? undefined,
         source: t.source ?? undefined,
         sourceBranchId: t.sourceBranchId ?? undefined,
         branchId: t.branchId ?? undefined,
