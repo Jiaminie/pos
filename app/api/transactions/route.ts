@@ -24,6 +24,16 @@ export async function GET(request: NextRequest) {
     const deviceId = searchParams.get("deviceId") ?? undefined;
     const branchId = searchParams.get("branchId") ?? undefined;
     const slim = searchParams.get("slim") === "1";
+    // Incremental sync: only rows created at/after this instant. The client
+    // passes the server clock from its previous pull, so it re-downloads just
+    // the new tail of the append-only ledger instead of the whole history.
+    const sinceRaw = searchParams.get("since");
+    const since = sinceRaw ? new Date(sinceRaw) : undefined;
+    const sinceValid = since && !Number.isNaN(since.getTime()) ? since : undefined;
+
+    // Captured before the query so anything inserted while the client pages
+    // through results is caught by its next incremental pull, not skipped.
+    const serverTime = new Date().toISOString();
 
     const scopedBranch = user.role === 'OWNER' ? branchId : (user.branchId ?? branchId);
 
@@ -32,6 +42,7 @@ export async function GET(request: NextRequest) {
         ...(productId ? { productId } : {}),
         ...(deviceId ? { deviceId } : {}),
         ...(scopedBranch ? { branchId: scopedBranch } : {}),
+        ...(sinceValid ? { createdAt: { gte: sinceValid } } : {}),
       },
       // Total ordering: createdAt is non-unique (imported stock txns use
       // createMany → identical Postgres now() timestamp), so the id cursor
@@ -48,7 +59,7 @@ export async function GET(request: NextRequest) {
 
     return Response.json({
       data: page,
-      meta: { nextCursor, hasMore },
+      meta: { nextCursor, hasMore, serverTime },
       error: null,
     });
   } catch (err) {

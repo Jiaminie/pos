@@ -21,11 +21,31 @@ function parseInitialStock(qty: string | null | undefined): number {
   return nums ? nums.reduce((s, n) => s + parseInt(n, 10), 0) : 0
 }
 
-const SYNC_TTL = 5 * 60 * 1000 // 5 minutes
+const SYNC_TTL = 30 * 60 * 1000 // 30 minutes
 // v3: opening stock is now scoped to the origin branch (see ownsOpeningStock
 // below). Bumping the key forces existing devices to re-seed so non-origin
 // branches drop the inherited initialStock baseline.
 const SYNC_TS_KEY = 'pos_last_sync_v3'
+
+// Incremental-sync watermark: the server clock at the last successful
+// transaction pull. The inventory ledger is append-only (rows are never
+// content-mutated — only `syncedAt` is stamped), so on a normal sync we only
+// need transactions created at/after this mark instead of re-downloading the
+// entire history every time. That full re-pull was the dominant network-transfer
+// cost. A full pull (first seed, force, or replace) resets this to the server
+// clock; deep-backdated admin inserts (rare, done via direct DB) are reconciled
+// by the next force/replace, not incremental sync.
+const TX_WATERMARK_KEY = 'pos_tx_sync_watermark_v1'
+
+function getTxWatermark(): string | null {
+  if (typeof window === 'undefined') return null
+  return localStorage.getItem(TX_WATERMARK_KEY)
+}
+
+function setTxWatermark(iso: string | null): void {
+  if (typeof window === 'undefined' || !iso) return
+  localStorage.setItem(TX_WATERMARK_KEY, iso)
+}
 
 type SyncOptions = {
   force?: boolean
@@ -42,10 +62,17 @@ type CatalogFetch = {
   transfers: StockTransfer[]
   transactions: InventoryTransaction[]
   totalProducts?: number
+  // Server clock at the start of the transaction pull, to persist as the next
+  // incremental watermark. Null when the transaction fetch never ran.
+  txWatermark: string | null
 }
 
 async function fetchCatalogFromServer(
   onProgress?: (progress: CatalogSyncProgress) => void,
+  // When set, only transactions created at/after this instant are pulled
+  // (incremental). Null/undefined pulls the entire ledger (first seed, force,
+  // replace).
+  sinceTx?: string | null,
 ): Promise<CatalogFetch | null> {
   const started = Date.now()
   let progress = initialSyncProgress()
@@ -189,12 +216,17 @@ async function fetchCatalogFromServer(
   report({ phase: 'download', message: 'Downloading stock movements…', productsLoaded: products.length, totalProducts })
   const transactions: InventoryTransaction[] = []
   let txCursor: string | null = null
+  let txWatermark: string | null = null
   const branchParam = branchId ? `&branchId=${branchId}` : ''
+  const sinceParam = sinceTx ? `&since=${encodeURIComponent(sinceTx)}` : ''
   do {
-    const url: string = `/api/transactions?slim=1&limit=200${branchParam}${txCursor ? `&cursor=${txCursor}` : ''}`
+    const url: string = `/api/transactions?slim=1&limit=200${branchParam}${sinceParam}${txCursor ? `&cursor=${txCursor}` : ''}`
     const res = await fetch(url, { cache: 'no-store' })
     if (!res.ok) break
     const { data, meta } = await res.json()
+    // Server clock captured on the first page becomes the next watermark, so
+    // rows inserted during this multi-page walk are caught next time.
+    if (txWatermark == null && meta?.serverTime) txWatermark = meta.serverTime as string
     for (const t of data) {
       const type: TransactionType =
         t.type === 'PURCHASE' || t.type === 'RETURN' ? 'STOCK_IN' : t.type
@@ -216,7 +248,7 @@ async function fetchCatalogFromServer(
     txCursor = meta?.hasMore ? (meta.nextCursor as string | null) : null
   } while (txCursor)
 
-  return { categories, products, units, organizations, branches: branchesData, transfers, transactions, totalProducts }
+  return { categories, products, units, organizations, branches: branchesData, transfers, transactions, totalProducts, txWatermark }
 }
 
 export async function syncFromServer(options: SyncOptions = {}): Promise<boolean> {
@@ -228,7 +260,11 @@ export async function syncFromServer(options: SyncOptions = {}): Promise<boolean
   }
 
   try {
-    const catalog = await fetchCatalogFromServer(onProgress)
+    // Force/replace reconcile the whole ledger (sinceTx = null); a routine sync
+    // pulls only what's new since the last watermark. First sync (no watermark)
+    // naturally falls back to a full pull.
+    const sinceTx = force || replace ? null : getTxWatermark()
+    const catalog = await fetchCatalogFromServer(onProgress, sinceTx)
     if (!catalog) return false
 
     const { categories, products, units, organizations, branches, transfers, transactions } = catalog
@@ -264,6 +300,9 @@ export async function syncFromServer(options: SyncOptions = {}): Promise<boolean
 
     if (typeof window !== 'undefined') {
       localStorage.setItem(SYNC_TS_KEY, String(Date.now()))
+      // Advance the incremental watermark only after the merge succeeds, so a
+      // failed pull re-fetches the same window next time rather than skipping it.
+      setTxWatermark(catalog.txWatermark)
     }
     return true
   } catch {
@@ -327,7 +366,7 @@ export async function replaceCatalogFromServer(
       return { ok: false, productCount: 0 }
     }
 
-    const { categories, products, units, organizations, branches, transfers, transactions, totalProducts } = catalog
+    const { categories, products, units, organizations, branches, transfers, transactions, totalProducts, txWatermark } = catalog
 
     if (totalProducts != null && totalProducts > 0 && products.length === 0) {
       onProgress?.({
@@ -366,6 +405,9 @@ export async function replaceCatalogFromServer(
 
     if (typeof window !== 'undefined') {
       localStorage.setItem(SYNC_TS_KEY, String(Date.now()))
+      // Full reconcile just completed — set the incremental watermark so
+      // subsequent routine syncs only fetch newer movements.
+      setTxWatermark(txWatermark)
     }
 
     onProgress?.({
