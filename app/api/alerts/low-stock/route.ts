@@ -14,10 +14,18 @@ export async function POST(req: Request) {
 
   const resend = new Resend(process.env.RESEND_API_KEY)
   try {
-    const { items }: { items: LowStockItem[] } = await req.json()
+    const { items, triggeredBy }: { items: LowStockItem[]; triggeredBy?: string[] } = await req.json()
     if (!items?.length) return Response.json({ sent: false, reason: 'no items' })
 
-    const rows = items
+    const sorted = [...items].sort((a, b) => a.stock - b.stock)
+    const triggerLine =
+      triggeredBy?.length === 1
+        ? `<strong>${triggeredBy[0]}</strong> just crossed the threshold during checkout.`
+        : triggeredBy?.length
+          ? `<strong>${triggeredBy.slice(0, 3).join(', ')}${triggeredBy.length > 3 ? ` +${triggeredBy.length - 3} more` : ''}</strong> just crossed the threshold during checkout.`
+          : 'A checkout just pushed stock below the threshold.'
+
+    const rows = sorted
       .map(
         (i) => `<tr>
           <td style="padding:6px 12px;border-bottom:1px solid #e5e7eb">${i.name}</td>
@@ -33,7 +41,7 @@ export async function POST(req: Request) {
           <h2 style="margin:0">⚠ Low Stock Alert</h2>
         </div>
         <div style="border:1px solid #e5e7eb;border-top:none;padding:16px 24px;border-radius:0 0 8px 8px">
-          <p>The following products have fallen below the threshold of <strong>${LOW_STOCK_THRESHOLD} units</strong>:</p>
+          <p>${triggerLine} Below is the full list of products currently below <strong>${LOW_STOCK_THRESHOLD} units</strong>:</p>
           <table style="width:100%;border-collapse:collapse;font-size:14px">
             <thead>
               <tr style="background:#fef3c7">

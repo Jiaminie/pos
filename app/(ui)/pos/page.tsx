@@ -794,7 +794,8 @@ export default function POSPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          items: newlyLow.map(({ product, stock }) => ({
+          triggeredBy: newlyLow.map(({ product }) => product.name),
+          items: nowLow.map(({ product, stock }) => ({
             name: product.name,
             sku: product.sku,
             stock,
