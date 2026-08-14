@@ -523,7 +523,26 @@ export default function ReportsPage() {
     const lines = rows.map((r) =>
       `"${r.isStockOnly ? 'Stocked in' : 'Sold'}","${r.name}","${r.sku}","${r.category}",${r.sold},${r.stocked},${r.listRevenue.toFixed(2)},${r.revenue.toFixed(2)},${(r.listRevenue - r.revenue).toFixed(2)},${r.netStock}`
     )
-    const blob = new Blob([[header, ...lines].join('\n')], { type: 'text/csv' })
+    const parts = [[header, ...lines].join('\n')]
+
+    if (paymentData && paymentData.saleCount > 0) {
+      const pShare = (amount: number) => (paymentData.total > 0 ? `${((amount / paymentData.total) * 100).toFixed(1)}%` : '—')
+      const pLines = [
+        '',
+        'Reported Sales (Payment Breakdown)',
+        'Method,Sales,Amount (KES),Share',
+        ...paymentData.byMethod.map((m) =>
+          `"${m.label}",${m.count},${m.amount.toFixed(2)},${pShare(m.amount)}`,
+        ),
+        ...(paymentData.unrecordedAmount > 0
+          ? [`"Unrecorded",${paymentData.unrecordedCount},${paymentData.unrecordedAmount.toFixed(2)},${pShare(paymentData.unrecordedAmount)}`]
+          : []),
+        `"TOTAL",,${paymentData.total.toFixed(2)},${pShare(paymentData.total)}`,
+      ]
+      parts.push(pLines.join('\n'))
+    }
+
+    const blob = new Blob([parts.join('\n')], { type: 'text/csv' })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
     a.href     = url
@@ -577,6 +596,19 @@ export default function ReportsPage() {
             .map(([r, c]) => `${INCIDENT_REASON_LABELS[r as keyof typeof INCIDENT_REASON_LABELS] ?? r} (${c})`)
             .join(', '),
         })),
+        payments: paymentData && paymentData.saleCount > 0
+          ? {
+              byMethod: paymentData.byMethod.map((m) => ({
+                label: m.label,
+                count: m.count,
+                amount: m.amount,
+              })),
+              unrecordedCount: paymentData.unrecordedCount,
+              unrecordedAmount: paymentData.unrecordedAmount,
+              total: paymentData.total,
+              saleCount: paymentData.saleCount,
+            }
+          : undefined,
       })
       doc.save(`cob-report-${range === 'custom' ? `${customFrom}_to_${customTo}` : range}.pdf`)
       toast.success('Report downloaded as PDF')

@@ -665,6 +665,21 @@ export interface ABCAnalysis {
   slowMoverTotal: number        // full count, for "showing X of Y"
 }
 
+export interface PaymentBreakdownRow {
+  label: string       // 'Cash' | 'M-Pesa' | bank name
+  count: number       // number of tenders using this method
+  amount: number      // amount collected via this method
+}
+
+/** How the reported sales were paid — mirrors the on-screen "Payment breakdown". */
+export interface PaymentBreakdown {
+  byMethod: PaymentBreakdownRow[]
+  unrecordedCount: number
+  unrecordedAmount: number
+  total: number       // sum of sale totals (recorded + unrecorded)
+  saleCount: number   // non-voided sales in the period
+}
+
 export interface COBReportData {
   dateLabel: string
   revenue: number       // actual revenue
@@ -676,6 +691,7 @@ export interface COBReportData {
   lowStockItems: Array<{ name: string; sku: string; stock: number }>
   missedSales?: MissedSaleRow[]
   abc?: ABCAnalysis     // stock movement analysis (ABC)
+  payments?: PaymentBreakdown  // reported sales payment breakdown
 }
 
 /** Stock Movement (ABC) section — summary + slow-mover action list. Returns y after. */
@@ -746,6 +762,49 @@ function drawStockMovement(doc: jsPDF, abc: ABCAnalysis, y: number, primary: RGB
   return y
 }
 
+/** Reported Sales — how the money was collected (payment breakdown). Returns y after. */
+function drawReportedSales(doc: jsPDF, payments: PaymentBreakdown, y: number, primary: RGB, cur: string): number {
+  const r2 = (n: number) => Math.round(n * 100) / 100
+
+  y = drawSectionHeader(doc, 'Reported Sales', y, primary)
+
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(8)
+  doc.setTextColor(...GRAY_TXT)
+  doc.text(
+    `${payments.saleCount} sale${payments.saleCount === 1 ? '' : 's'} recorded in this period` +
+      (payments.unrecordedAmount > 0
+        ? ` — ${payments.unrecordedCount} with no payment records`
+        : ''),
+    MARGIN + 5,
+    y,
+  )
+  y += 5
+
+  const shareOf = (amount: number) => (payments.total > 0 ? `${((amount / payments.total) * 100).toFixed(1)}%` : '—')
+
+  autoTable(doc, {
+    startY: y,
+    head: [['Method', 'Sales', `Amount (${cur})`, 'Share']],
+    body: [
+      ...payments.byMethod.map((m) => [m.label, String(m.count), r2(m.amount).toLocaleString(), shareOf(m.amount)]),
+      ...(payments.unrecordedAmount > 0
+        ? [['Unrecorded', String(payments.unrecordedCount), r2(payments.unrecordedAmount).toLocaleString(), shareOf(payments.unrecordedAmount)]]
+        : []),
+    ],
+    foot: [[{ content: 'TOTAL', colSpan: 2, styles: { halign: 'right' as const } }, r2(payments.total).toLocaleString(), shareOf(payments.total)]],
+    footStyles: { fillColor: GRAY_BG, textColor: DARK, fontStyle: 'bold', fontSize: 8 },
+    showFoot: 'lastPage',
+    headStyles: { fillColor: primary, textColor: WHITE, fontSize: 8 },
+    bodyStyles: { fontSize: 8 },
+    columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
+    alternateRowStyles: { fillColor: [249, 250, 251] },
+    margin: { left: MARGIN, right: MARGIN },
+  })
+
+  return (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8
+}
+
 export function generateCOBReportPDF(data: COBReportData, settingsOverride?: PDFSettings): jsPDF {
   const settings = settingsOverride ?? loadSettings()
   const primary  = hexToRgb(settings.primaryColor)
@@ -791,6 +850,11 @@ export function generateCOBReportPDF(data: COBReportData, settingsOverride?: PDF
   const lines = doc.splitTextToSize(summaryText, CONTENT - 10) as string[]
   doc.text(lines, MARGIN + 5, y)
   y += lines.length * 5 + 6
+
+  // ── Reported Sales — how the money was collected (payment breakdown)
+  if (data.payments) {
+    y = drawReportedSales(doc, data.payments, y, primary, cur)
+  }
 
   // ── Product Breakdown table
   y = drawSectionHeader(doc, 'Product Breakdown', y, primary)

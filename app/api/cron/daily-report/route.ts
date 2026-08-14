@@ -2,10 +2,10 @@ import { prisma } from '@/lib/server/db'
 import { buildStockByProductFromGroupBy } from '@/lib/server/stockAccumulation'
 import { Resend } from 'resend'
 import { generateCOBReportPDF } from '@/lib/pdf'
-import type { COBReportData, COBReportRow, MissedSaleRow, ABCAnalysis } from '@/lib/pdf'
+import type { COBReportData, COBReportRow, MissedSaleRow, ABCAnalysis, PaymentBreakdown } from '@/lib/pdf'
 import type { PDFSettings } from '@/lib/settings'
 import { parseReceiptFormat, parsePosLookupMode } from '@/lib/settings'
-import { DEFAULT_BANK_OPTIONS, parseBankOptions } from '@/lib/payments'
+import { DEFAULT_BANK_OPTIONS, parseBankOptions, methodLabel } from '@/lib/payments'
 
 const LOW_STOCK_THRESHOLD = 5
 
@@ -202,6 +202,41 @@ export async function POST() {
       slowMoverTotal: slowPool.length,
     }
 
+    // ── Reported Sales — how today's money was collected (payment breakdown)
+    const todaySales = await prisma.sale.findMany({
+      where: { voidedAt: null, createdAt: { gte: start, lte: end } },
+      select: {
+        id: true,
+        total: true,
+        payments: { select: { method: true, bankName: true, amount: true } },
+      },
+    })
+    const byMethod = new Map<string, { label: string; count: number; amount: number }>()
+    let unrecordedAmount = 0
+    let unrecordedCount = 0
+    for (const sale of todaySales) {
+      const total = Number(sale.total)
+      if (sale.payments.length === 0) {
+        unrecordedAmount += total
+        unrecordedCount += 1
+        continue
+      }
+      for (const p of sale.payments) {
+        const label = methodLabel(p.method, p.bankName)
+        const entry = byMethod.get(label) ?? { label, count: 0, amount: 0 }
+        entry.count += 1
+        entry.amount += Number(p.amount)
+        byMethod.set(label, entry)
+      }
+    }
+    const payments: PaymentBreakdown = {
+      byMethod: [...byMethod.values()].sort((a, b) => b.amount - a.amount),
+      unrecordedAmount: round2(unrecordedAmount),
+      unrecordedCount,
+      total: round2(todaySales.reduce((s, sale) => s + Number(sale.total), 0)),
+      saleCount: todaySales.length,
+    }
+
     // ── Assemble COBReportData
     const dateLabel = start.toLocaleDateString('en-KE', { year: 'numeric', month: 'short', day: 'numeric' })
     const reportData: COBReportData = {
@@ -214,6 +249,7 @@ export async function POST() {
       lowStockItems,
       missedSales,
       abc,
+      ...(todaySales.length > 0 ? { payments } : {}),
     }
 
     // ── Generate PDF
