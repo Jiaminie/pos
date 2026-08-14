@@ -64,6 +64,10 @@ export async function logout(): Promise<void> {
 
 export function canManageTeam(user: AuthUser): boolean {
   if (user.role === 'OWNER') return true
+  // TeamSection renders nothing for a CASHIER regardless of grants, so the
+  // permission alone is not enough — returning true here put a Team tab in
+  // front of cashiers that opened to a blank page.
+  if (user.role !== 'MANAGER') return false
   return hasPermission(user, 'users.manage.cashiers')
 }
 

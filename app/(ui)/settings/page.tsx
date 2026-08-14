@@ -35,6 +35,11 @@ const COLORS = [
 
 type SettingsTab = 'store' | 'pricing' | 'pos' | 'receipts' | 'documents' | 'email' | 'branches' | 'team' | 'permissions' | 'device'
 
+// Tabs backed by the org-wide storeSettings record (PATCH /api/settings), which
+// requires the owner-only admin.settings. Branches/team/permissions have their
+// own guards; device is local to this machine, so any signed-in user keeps it.
+const STORE_SETTINGS_TABS: SettingsTab[] = ['store', 'pricing', 'pos', 'receipts', 'documents', 'email']
+
 const TABS: { id: SettingsTab; label: string; description: string; icon: typeof Building2 }[] = [
   { id: 'store',     label: 'Store',     description: 'Name, logo & branding',        icon: Building2 },
   { id: 'pricing',   label: 'Pricing',   description: 'POS discount rules',           icon: Percent },
@@ -80,27 +85,46 @@ export default function SettingsPage() {
   const [deviceUiMode, setDeviceUiModeState] = useState<DeviceUiMode>('desktop')
   const [showTeamTab, setShowTeamTab] = useState(false)
   const [showPermissionsTab, setShowPermissionsTab] = useState(false)
-  const [canEditSettings, setCanEditSettings] = useState(true)
+  const [canEditSettings, setCanEditSettings] = useState(false)
+  const [canManageBranches, setCanManageBranches] = useState(false)
+  // Gates start closed and the page waits for this, so an under-privileged user
+  // never sees a tab flash before it is removed.
+  const [authLoaded, setAuthLoaded] = useState(false)
 
   // Bank accounts editor state
   const [newBankName, setNewBankName] = useState('')
 
+  // Every tab is hidden unless the user can actually act on it. A tab nobody
+  // can use is worse than a missing one: it invites edits that the server
+  // rejects, or opens to a blank panel.
   function tabVisible(t: (typeof TABS)[number]) {
     if (t.id === 'team' && !showTeamTab) return false
     if (t.id === 'permissions' && !showPermissionsTab) return false
+    if (t.id === 'branches' && !canManageBranches) return false
+    if (STORE_SETTINGS_TABS.includes(t.id) && !canEditSettings) return false
     return true
   }
+
+  // Resolve the tab during render rather than correcting it in an effect, so a
+  // hidden tab (the 'store' default, or one deep-linked to) never paints even
+  // for a frame before being swapped out.
+  const visibleTabs = TABS.filter(tabVisible)
+  const effectiveTab: SettingsTab = visibleTabs.some((t) => t.id === activeTab)
+    ? activeTab
+    : (visibleTabs[0]?.id ?? 'device')
 
   useEffect(() => {
     fetchMe().then((u) => {
       setShowTeamTab(!!u && canManageTeam(u))
       setShowPermissionsTab(!!u && hasPermission(u, 'admin.permissions.configure'))
-      // admin.settings is owner-only server-side, so anyone else can look but
-      // not save. Starts true so the Owner never flashes a read-only banner;
-      // the server is the actual gate either way.
+      // admin.settings is owner-only server-side (isOwnerOnlyPermission), so
+      // for anyone else these tabs would only ever produce a 403 on save.
       setCanEditSettings(!!u && hasPermission(u, 'admin.settings'))
+      setCanManageBranches(!!u && hasPermission(u, 'admin.branch.manage'))
+      setAuthLoaded(true)
     })
   }, [])
+
 
   useEffect(() => {
     fetchSettings().then((s) => { setSettings(s); setLoading(false) })
@@ -110,9 +134,9 @@ export default function SettingsPage() {
   }, [])
 
   useEffect(() => {
-    if ((activeTab === 'branches' || activeTab === 'team' || activeTab === 'device') && branches.length === 0) loadBranches()
+    if ((effectiveTab === 'branches' || effectiveTab === 'team' || effectiveTab === 'device') && branches.length === 0) loadBranches()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab])
+  }, [effectiveTab])
 
   async function loadBranches() {
     setBranchesLoading(true)
@@ -378,7 +402,7 @@ export default function SettingsPage() {
     }
   }
 
-  if (loading) {
+  if (loading || !authLoaded) {
     return (
       <div className="flex-1 flex items-center justify-center text-sm text-gray-400">
         Loading settings…
@@ -386,13 +410,9 @@ export default function SettingsPage() {
     )
   }
 
-  const activeMeta = TABS.find((t) => t.id === activeTab)!
+  const activeMeta = TABS.find((t) => t.id === effectiveTab)!
 
-  // Tabs backed by the org-wide storeSettings record (PATCH /api/settings).
-  // Excluded: branches/team/permissions have their own guards, and device is
-  // local to this machine — a cashier must still be able to set it.
-  const STORE_SETTINGS_TABS: SettingsTab[] = ['store', 'pricing', 'pos', 'receipts', 'documents', 'email']
-  const isStoreSettingsTab = STORE_SETTINGS_TABS.includes(activeTab)
+  const isStoreSettingsTab = STORE_SETTINGS_TABS.includes(effectiveTab)
   const readOnly = isStoreSettingsTab && !canEditSettings
 
   return (
@@ -405,7 +425,7 @@ export default function SettingsPage() {
         </div>
         <nav className="flex-1 p-3 space-y-0.5">
           {TABS.filter(tabVisible).map(({ id, label, description, icon: Icon }) => {
-            const active = activeTab === id
+            const active = effectiveTab === id
             return (
               <button
                 key={id}
@@ -441,7 +461,7 @@ export default function SettingsPage() {
             </div>
             <nav className="flex gap-1 overflow-x-auto pb-1 lg:hidden scrollbar-none">
               {TABS.filter(tabVisible).map(({ id, label, icon: Icon }) => {
-                const active = activeTab === id
+                const active = effectiveTab === id
                 return (
                   <button
                     key={id}
@@ -469,7 +489,7 @@ export default function SettingsPage() {
             <p className="text-xs text-gray-500 mt-0.5 hidden sm:block">{activeMeta.description}</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {activeTab === 'documents' && (
+            {effectiveTab === 'documents' && (
               <button
                 type="button"
                 onClick={handlePreview}
@@ -512,7 +532,7 @@ export default function SettingsPage() {
                 </div>
               </div>
             )}
-            {activeTab === 'store' && (
+            {effectiveTab === 'store' && (
               <div className="space-y-6">
                 <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-5">
                   <div>
@@ -594,7 +614,7 @@ export default function SettingsPage() {
               </div>
             )}
 
-            {activeTab === 'pricing' && (
+            {effectiveTab === 'pricing' && (
               <div className="space-y-6">
                 <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
                   <div>
@@ -638,7 +658,7 @@ export default function SettingsPage() {
               </div>
             )}
 
-            {activeTab === 'pos' && (
+            {effectiveTab === 'pos' && (
               <div className="space-y-6">
                 <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
                   <div>
@@ -689,7 +709,7 @@ export default function SettingsPage() {
               </div>
             )}
 
-            {activeTab === 'receipts' && (
+            {effectiveTab === 'receipts' && (
               <div className="space-y-6">
                 <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
                   <div>
@@ -893,7 +913,7 @@ export default function SettingsPage() {
               </div>
             )}
 
-            {activeTab === 'documents' && (
+            {effectiveTab === 'documents' && (
               <div className="space-y-6">
                 <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
                   <div>
@@ -997,7 +1017,7 @@ export default function SettingsPage() {
                 </section>
               </div>
             )}
-            {activeTab === 'branches' && (
+            {effectiveTab === 'branches' && (
               <div className="space-y-6">
                 <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-3">
                   <div>
@@ -1192,15 +1212,15 @@ export default function SettingsPage() {
               </div>
             )}
 
-            {activeTab === 'team' && showTeamTab && (
+            {effectiveTab === 'team' && showTeamTab && (
               <TeamSection branches={branches.filter((b) => !b.pending)} />
             )}
 
-            {activeTab === 'permissions' && showPermissionsTab && (
+            {effectiveTab === 'permissions' && showPermissionsTab && (
               <PermissionsSection />
             )}
 
-            {activeTab === 'email' && (
+            {effectiveTab === 'email' && (
               <div className="space-y-6">
                 <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-5">
                   <div>
@@ -1301,7 +1321,7 @@ export default function SettingsPage() {
               </div>
             )}
 
-            {activeTab === 'device' && (
+            {effectiveTab === 'device' && (
               <div className="space-y-6">
                 {!deviceBranchId && (
                   <section className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
