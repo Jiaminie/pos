@@ -50,17 +50,37 @@ export default function PaymentSheet({
   const bankDraftMissing = parsed.some((t) => t.method === 'BANK' && t.bankName.trim() === '')
   const confirmDisabled = busy || remaining > 0.01 || bankDraftMissing
 
+  /**
+   * The first tender absorbs the balance whenever a LATER tender's amount
+   * changes, so the cashier types only the other amounts: opening on
+   * "Cash 1,200" and typing "M-Pesa 500" leaves "Cash 700" automatically.
+   * Editing the first tender directly is never auto-corrected — the cashier is
+   * driving it, and the remaining balance is shown instead.
+   */
+  function rebalance(list: TenderDraft[]): TenderDraft[] {
+    if (list.length < 2) return list
+    const others = list
+      .slice(1)
+      .reduce((s, t) => s + (parseFloat(t.amount) || 0), 0)
+    const [first, ...rest] = list
+    return [{ ...first, amount: String(round2(Math.max(0, total - others))) }, ...rest]
+  }
+
   function updateTender(id: string, patch: Partial<TenderDraft>) {
-    setTenders((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)))
+    setTenders((prev) => {
+      const next = prev.map((t) => (t.id === id ? { ...t, ...patch } : t))
+      return patch.amount !== undefined && next[0]?.id !== id ? rebalance(next) : next
+    })
   }
 
   function removeTender(id: string) {
-    setTenders((prev) => prev.filter((t) => t.id !== id))
+    setTenders((prev) => rebalance(prev.filter((t) => t.id !== id)))
   }
 
   function addTender() {
+    // Always available: the sheet opens fully covered by the Cash default, so
+    // gating this on a positive balance made split payment unreachable.
     const bal = remainingToPay(numeric, total)
-    if (bal <= 0) return
     setTenders((prev) => [
       ...prev,
       {
@@ -68,7 +88,7 @@ export default function PaymentSheet({
         method: 'MPESA',
         bankName: '',
         reference: '',
-        amount: bal > 0 ? String(round2(bal)) : '0',
+        amount: bal > 0.01 ? String(round2(bal)) : '0',
       },
     ])
   }
@@ -213,7 +233,7 @@ export default function PaymentSheet({
             <button
               type="button"
               onClick={addTender}
-              disabled={remaining <= 0}
+              disabled={busy || tenders.length >= 4}
               className="w-full flex items-center justify-center gap-1.5 min-h-11 border border-dashed border-gray-300 rounded-xl text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40 transition-colors"
             >
               <Plus size={15} />

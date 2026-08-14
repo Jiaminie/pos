@@ -1,5 +1,5 @@
 import {
-  clampUnitPrice,
+  clampCartUnitPrice,
   discountPerUnit,
   effectiveLowestPrice,
 } from '@/lib/pricing'
@@ -43,7 +43,10 @@ export function applyCartDiscount(
   const updated = lines.map((line) => {
     const share = applied * ((line.unitPrice * line.qty) / cartSubtotal)
     const perUnitShare = share / line.qty
-    const newUnit = clampUnitPrice(
+    // Floor only — this path already subtracts, so a list-price ceiling can
+    // never help, and it would slam a marked-up line down to list the moment
+    // any cart discount is applied.
+    const newUnit = clampCartUnitPrice(
       line,
       line.unitPrice - perUnitShare,
       minMarkupPercent,

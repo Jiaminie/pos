@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/server/db'
 import {
-  clampUnitPrice,
+  clampCartUnitPrice,
   discountPerUnit,
   effectiveLowestPrice,
 } from '@/lib/pricing'
@@ -64,7 +64,10 @@ export async function validateAndBuildSale(
       { sellingPrice: sell, costPrice: cost, lowestPrice: lowest },
       minMarkup,
     )
-    const clamped = clampUnitPrice(
+    // Floor only — never cap at the catalog list price. The register lets a
+    // cashier sell ABOVE list (clampCartUnitPrice), so capping here silently
+    // rewrote marked-up sales down to list and under-recorded the takings.
+    const clamped = clampCartUnitPrice(
       { sellingPrice: sell, costPrice: cost, lowestPrice: lowest },
       line.unitPrice,
       minMarkup,
