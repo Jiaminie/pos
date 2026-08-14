@@ -166,6 +166,18 @@ export async function fetchSettings(): Promise<PDFSettings> {
 }
 
 /** Persist to server and update local cache. */
+export class SettingsSaveError extends Error {
+  readonly status: number
+  /** True when the server rejected the identity, not the request. */
+  readonly forbidden: boolean
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'SettingsSaveError'
+    this.status = status
+    this.forbidden = status === 401 || status === 403
+  }
+}
+
 export async function saveSettings(s: PDFSettings): Promise<void> {
   cacheSettings(s)
   const res = await fetch('/api/settings', {
@@ -173,7 +185,12 @@ export async function saveSettings(s: PDFSettings): Promise<void> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...s, bankOptions: serializeBankOptions(s.bankOptions) }),
   })
-  if (!res.ok) throw new Error('Failed to save settings'  )
+  if (!res.ok) {
+    // A 403 here means the signed-in user lacks admin.settings (owner-only).
+    // Reporting that as a connection problem sends people to check the wifi.
+    const detail = await res.json().catch(() => null)
+    throw new SettingsSaveError(res.status, detail?.error ?? `Save failed (HTTP ${res.status})`)
+  }
 }
 
 // ── Email / notification settings (stored in DB, never in localStorage)

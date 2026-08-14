@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Building2, Check, FileText, GitBranch, Loader2, Mail, MapPin, Monitor, Pencil, Percent, Plus, Receipt, ScanBarcode, Shield, Smartphone, Star, Tablet, Trash2, Upload, Users, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { fetchSettings, saveSettings, fetchEmailSettings, saveEmailSettings, DEFAULT_SETTINGS, DEFAULT_EMAIL_SETTINGS, POS_LOOKUP_MODES, RECEIPT_FORMATS, type PDFSettings, type EmailSettings, type PosLookupMode, type ReceiptFormat } from '@/lib/settings'
+import { fetchSettings, saveSettings, SettingsSaveError, fetchEmailSettings, saveEmailSettings, DEFAULT_SETTINGS, DEFAULT_EMAIL_SETTINGS, POS_LOOKUP_MODES, RECEIPT_FORMATS, type PDFSettings, type EmailSettings, type PosLookupMode, type ReceiptFormat } from '@/lib/settings'
 import { getMyBranchId, getMyOrgId, setMyBranchId } from '@/lib/branch'
 import { getAll as getLocalBranches } from '@/lib/db/branches'
 import type { Branch } from '@/lib/types'
@@ -80,6 +80,7 @@ export default function SettingsPage() {
   const [deviceUiMode, setDeviceUiModeState] = useState<DeviceUiMode>('desktop')
   const [showTeamTab, setShowTeamTab] = useState(false)
   const [showPermissionsTab, setShowPermissionsTab] = useState(false)
+  const [canEditSettings, setCanEditSettings] = useState(true)
 
   // Bank accounts editor state
   const [newBankName, setNewBankName] = useState('')
@@ -94,6 +95,10 @@ export default function SettingsPage() {
     fetchMe().then((u) => {
       setShowTeamTab(!!u && canManageTeam(u))
       setShowPermissionsTab(!!u && hasPermission(u, 'admin.permissions.configure'))
+      // admin.settings is owner-only server-side, so anyone else can look but
+      // not save. Starts true so the Owner never flashes a read-only banner;
+      // the server is the actual gate either way.
+      setCanEditSettings(!!u && hasPermission(u, 'admin.settings'))
     })
   }, [])
 
@@ -311,8 +316,17 @@ export default function SettingsPage() {
       await saveSettings(settings)
       setSaved(true)
       toast.success('Settings saved', { description: 'Changes apply across all devices.' })
-    } catch {
-      toast.error('Failed to save settings', { description: 'Check your connection and try again.' })
+    } catch (err) {
+      if (err instanceof SettingsSaveError && err.forbidden) {
+        toast.error('You cannot change store settings', {
+          description: 'Only the Owner can edit these. Ask them to make the change.',
+        })
+        return
+      }
+      const description = err instanceof SettingsSaveError
+        ? err.message
+        : 'Check your connection and try again.'
+      toast.error('Failed to save settings', { description })
     }
   }
 
@@ -373,6 +387,13 @@ export default function SettingsPage() {
   }
 
   const activeMeta = TABS.find((t) => t.id === activeTab)!
+
+  // Tabs backed by the org-wide storeSettings record (PATCH /api/settings).
+  // Excluded: branches/team/permissions have their own guards, and device is
+  // local to this machine — a cashier must still be able to set it.
+  const STORE_SETTINGS_TABS: SettingsTab[] = ['store', 'pricing', 'pos', 'receipts', 'documents', 'email']
+  const isStoreSettingsTab = STORE_SETTINGS_TABS.includes(activeTab)
+  const readOnly = isStoreSettingsTab && !canEditSettings
 
   return (
     <div className="flex-1 flex flex-col lg:flex-row overflow-hidden bg-gray-50/50">
@@ -458,7 +479,7 @@ export default function SettingsPage() {
                 Preview PDF
               </button>
             )}
-            {activeTab !== 'branches' && activeTab !== 'device' && activeTab !== 'team' && activeTab !== 'permissions' && (
+            {isStoreSettingsTab && !readOnly && (
               <button
                 type="button"
                 onClick={handleSave}
@@ -477,7 +498,20 @@ export default function SettingsPage() {
 
         {/* Scrollable panel body */}
         <div className="flex-1 overflow-y-auto">
-          <div className="max-w-2xl mx-auto px-5 py-6 lg:px-8 lg:py-8">
+          {/* A fieldset disables every control inside it in one go, so read-only
+              mode can't be defeated by a field someone forgot to wire up. */}
+          <fieldset disabled={readOnly} className="min-w-0 max-w-2xl mx-auto px-5 py-6 lg:px-8 lg:py-8">
+            {readOnly && (
+              <div className="mb-6 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <Shield size={16} className="mt-0.5 shrink-0 text-amber-600" />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-amber-900">View only</p>
+                  <p className="mt-0.5 text-xs text-amber-800">
+                    Only the Owner can change store settings. Ask them to make the change.
+                  </p>
+                </div>
+              </div>
+            )}
             {activeTab === 'store' && (
               <div className="space-y-6">
                 <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-5">
@@ -1389,7 +1423,7 @@ export default function SettingsPage() {
                 </section>
               </div>
             )}
-          </div>
+          </fieldset>
         </div>
       </div>
     </div>
