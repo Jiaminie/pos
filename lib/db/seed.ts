@@ -53,6 +53,22 @@ type SyncOptions = {
   onProgress?: (progress: CatalogSyncProgress) => void
 }
 
+// A sync abort with a reason the UI can show. The fetch walk is ~40 sequential
+// requests; when one fails the user needs to know which, otherwise every
+// failure mode collapses into the same "check your connection" toast.
+class SyncError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'SyncError'
+  }
+}
+
+function describeSyncError(err: unknown): string {
+  if (err instanceof SyncError) return err.message
+  if (err instanceof Error) return `${err.name}: ${err.message}`
+  return String(err)
+}
+
 type CatalogFetch = {
   categories: ProductCategory[]
   products: Product[]
@@ -95,7 +111,7 @@ async function fetchCatalogFromServer(
       : Promise.resolve(null),
   ])
 
-  if (!catRes.ok) return null
+  if (!catRes.ok) throw new SyncError(`categories request failed (HTTP ${catRes.status})`)
   const { data: catData } = await catRes.json()
   const units: Unit[] = unitsRes.ok ? ((await unitsRes.json()).data ?? []) : []
 
@@ -163,7 +179,11 @@ async function fetchCatalogFromServer(
     })
 
     const res = await fetch(url, { cache: 'no-store' })
-    if (!res.ok) return null
+    if (!res.ok) {
+      throw new SyncError(
+        `products batch ${batchIndex} failed (HTTP ${res.status}) after ${products.length} of ${totalProducts ?? '?'}`,
+      )
+    }
     const { data, meta } = await res.json()
 
     if (meta?.total != null) totalProducts = meta.total as number
@@ -206,7 +226,9 @@ async function fetchCatalogFromServer(
     })
   } while (cursor)
 
-  if (totalProducts != null && totalProducts > 0 && products.length === 0) return null
+  if (totalProducts != null && totalProducts > 0 && products.length === 0) {
+    throw new SyncError(`server reported ${totalProducts} products but returned none`)
+  }
 
   // Replicate the full movement log so every device computes identical stock.
   // Opening stock lives in product.quantity (initialStock); every other change
@@ -305,7 +327,8 @@ export async function syncFromServer(options: SyncOptions = {}): Promise<boolean
       setTxWatermark(catalog.txWatermark)
     }
     return true
-  } catch {
+  } catch (err) {
+    console.error('[sync] syncFromServer failed:', describeSyncError(err), err)
     return false
   }
 }
@@ -331,7 +354,7 @@ export async function forceSyncFromServer(): Promise<boolean> {
 
 export async function replaceCatalogFromServer(
   onProgress?: (progress: CatalogSyncProgress) => void,
-): Promise<{ ok: boolean; productCount: number }> {
+): Promise<{ ok: boolean; productCount: number; reason?: string }> {
   if (typeof window !== 'undefined') {
     localStorage.removeItem(SYNC_TS_KEY)
   }
@@ -353,32 +376,12 @@ export async function replaceCatalogFromServer(
 
   try {
     const catalog = await fetchCatalogFromServer(onProgress)
-    if (!catalog) {
-      onProgress?.({
-        phase: 'error',
-        message: 'Could not reach the server',
-        productsLoaded: 0,
-        categoriesLoaded: 0,
-        batchIndex: 0,
-        recentNames: [],
-        elapsedMs: 0,
-      })
-      return { ok: false, productCount: 0 }
-    }
+    if (!catalog) throw new SyncError('could not reach the server')
 
     const { categories, products, units, organizations, branches, transfers, transactions, totalProducts, txWatermark } = catalog
 
     if (totalProducts != null && totalProducts > 0 && products.length === 0) {
-      onProgress?.({
-        phase: 'error',
-        message: 'Download incomplete — local catalog was not changed',
-        productsLoaded: 0,
-        categoriesLoaded: 0,
-        batchIndex: 0,
-        recentNames: [],
-        elapsedMs: elapsed(),
-      })
-      return { ok: false, productCount: 0 }
+      throw new SyncError('download incomplete — local catalog was not changed')
     }
 
     onProgress?.({
@@ -392,16 +395,27 @@ export async function replaceCatalogFromServer(
       elapsedMs: elapsed(),
     })
 
-    await replaceCategories(categories)
-    await replaceProducts(products)
-    if (units.length > 0)         await replaceUnits(units)
-    if (organizations.length > 0) await replaceOrganizations(organizations)
-    if (branches.length > 0)      await replaceBranches(branches)
-    if (transfers.length > 0)     await upsertTransfers(transfers)
+    // Each write is labelled: a local IndexedDB failure (quota, aborted
+    // transaction) is indistinguishable from a network failure once it reaches
+    // the catch below, so name the step on the way past.
+    const step = async (label: string, run: () => Promise<unknown>) => {
+      try {
+        await run()
+      } catch (err) {
+        throw new SyncError(`local write "${label}" failed — ${describeSyncError(err)}`)
+      }
+    }
+
+    await step('categories', () => replaceCategories(categories))
+    await step('products', () => replaceProducts(products))
+    if (units.length > 0)         await step('units', () => replaceUnits(units))
+    if (organizations.length > 0) await step('organizations', () => replaceOrganizations(organizations))
+    if (branches.length > 0)      await step('branches', () => replaceBranches(branches))
+    if (transfers.length > 0)     await step('transfers', () => upsertTransfers(transfers))
     // Merge the server movement log by id (don't wipe — keeps un-uploaded
     // local sales). Opening stock stays in product.quantity, so this never
     // double-counts it.
-    if (transactions.length > 0)  await upsertTransactions(transactions)
+    if (transactions.length > 0)  await step('transactions', () => upsertTransactions(transactions))
 
     if (typeof window !== 'undefined') {
       localStorage.setItem(SYNC_TS_KEY, String(Date.now()))
@@ -422,17 +436,19 @@ export async function replaceCatalogFromServer(
     })
 
     return { ok: true, productCount: products.length }
-  } catch {
+  } catch (err) {
+    const reason = describeSyncError(err)
+    console.error('[sync] replaceCatalogFromServer failed:', reason, err)
     onProgress?.({
       phase: 'error',
-      message: 'Sync failed — try again',
+      message: `Sync failed — ${reason}`,
       productsLoaded: 0,
       categoriesLoaded: 0,
       batchIndex: 0,
       recentNames: [],
-      elapsedMs: 0,
+      elapsedMs: elapsed(),
     })
-    return { ok: false, productCount: 0 }
+    return { ok: false, productCount: 0, reason }
   }
 }
 

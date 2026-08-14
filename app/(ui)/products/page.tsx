@@ -151,7 +151,11 @@ function ProductsPageContent() {
     try {
       const sync = await replaceCatalogFromServer(setSyncProgress)
       if (!sync.ok) {
-        toast.error('Could not sync from server — check your connection')
+        toast.error(
+          sync.reason
+            ? `Could not sync from server — ${sync.reason}`
+            : 'Could not sync from server — check your connection',
+        )
         return
       }
       await loadCatalog(false)
