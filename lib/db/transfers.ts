@@ -1,5 +1,5 @@
 import type { StockTransfer, TransferStatus } from '../types'
-import { openDb } from './idb'
+import { openDb, settleTx } from './idb'
 
 export async function getAll(): Promise<StockTransfer[]> {
   const db = await openDb()
@@ -25,8 +25,7 @@ export async function upsert(transfer: StockTransfer): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction('transfers', 'readwrite')
     tx.objectStore('transfers').put(transfer)
-    tx.oncomplete = () => resolve()
-    tx.onerror    = () => reject(tx.error)
+    settleTx(tx, resolve, reject)
   })
 }
 
@@ -37,8 +36,7 @@ export async function upsertMany(transfers: StockTransfer[]): Promise<void> {
     const tx = db.transaction('transfers', 'readwrite')
     const store = tx.objectStore('transfers')
     for (const t of transfers) store.put(t)
-    tx.oncomplete = () => resolve()
-    tx.onerror    = () => reject(tx.error)
+    settleTx(tx, resolve, reject)
   })
 }
 
@@ -57,7 +55,6 @@ export async function updateStatus(
       if (!record) { resolve(); return }
       store.put({ ...record, status, ...(receivedAt ? { receivedAt } : {}) })
     }
-    tx.oncomplete = () => resolve()
-    tx.onerror    = () => reject(tx.error)
+    settleTx(tx, resolve, reject)
   })
 }

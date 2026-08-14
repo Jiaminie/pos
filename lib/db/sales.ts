@@ -1,6 +1,6 @@
 import type { SaleLine } from '../types'
 import type { SalePaymentInput } from '../payments'
-import { openDb } from './idb'
+import { openDb, settleTx } from './idb'
 
 export type Sale = {
   id: string
@@ -24,8 +24,7 @@ export async function create(sale: Sale): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction('sales', 'readwrite')
     tx.objectStore('sales').put(sale)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
+    settleTx(tx, resolve, reject)
   })
 }
 

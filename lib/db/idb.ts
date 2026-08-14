@@ -7,6 +7,19 @@ const DB_VERSION = 10
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
+// Settle a write transaction. Two traps this avoids:
+//  - `tx.error` is null when a transaction aborts (and on some error paths), so
+//    `reject(tx.error)` rejects with a bare null and the reason is lost.
+//  - an abort does not always fire `onerror`; without an `onabort` handler the
+//    promise never settles and the caller hangs forever.
+export function settleTx(tx: IDBTransaction, resolve: () => void, reject: (e: Error) => void): void {
+  tx.oncomplete = () => resolve()
+  tx.onerror = () =>
+    reject(tx.error ?? new Error(`IndexedDB transaction failed (${[...tx.objectStoreNames].join(', ')})`))
+  tx.onabort = () =>
+    reject(tx.error ?? new Error(`IndexedDB transaction aborted (${[...tx.objectStoreNames].join(', ')})`))
+}
+
 export function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise
 

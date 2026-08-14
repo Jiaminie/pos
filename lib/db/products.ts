@@ -1,5 +1,5 @@
 import type { Product } from '../types'
-import { openDb } from './idb'
+import { openDb, settleTx } from './idb'
 
 export async function upsertMany(products: Product[]): Promise<void> {
   const db = await openDb()
@@ -7,8 +7,7 @@ export async function upsertMany(products: Product[]): Promise<void> {
     const tx = db.transaction('products', 'readwrite')
     const store = tx.objectStore('products')
     for (const product of products) store.put(product)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
+    settleTx(tx, resolve, reject)
   })
 }
 
@@ -17,8 +16,7 @@ export async function clearAll(): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction('products', 'readwrite')
     tx.objectStore('products').clear()
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
+    settleTx(tx, resolve, reject)
   })
 }
 
@@ -28,9 +26,8 @@ export async function replaceAll(products: Product[]): Promise<void> {
     const tx = db.transaction('products', 'readwrite')
     const store = tx.objectStore('products')
     store.clear()
-    for (const product of products) store.add(product)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
+    for (const product of products) store.put(product)
+    settleTx(tx, resolve, reject)
   })
 }
 

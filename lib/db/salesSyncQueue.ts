@@ -1,5 +1,5 @@
 import type { Sale } from './sales'
-import { openDb } from './idb'
+import { openDb, settleTx } from './idb'
 
 // Offline backlog thresholds. We never BLOCK sales offline (a real outage must
 // not brick a counter) — past these we warn the cashier and alert the owner.
@@ -17,8 +17,7 @@ export async function push(sale: Sale): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction('salesQueue', 'readwrite')
     tx.objectStore('salesQueue').put(stamped)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
+    settleTx(tx, resolve, reject)
   })
 }
 
@@ -68,8 +67,7 @@ export async function drain(): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction('salesQueue', 'readwrite')
       tx.objectStore('salesQueue').delete(sale.id)
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => reject(tx.error)
+      settleTx(tx, resolve, reject)
     })
   }
 

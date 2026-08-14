@@ -149,9 +149,15 @@ async function fetchCatalogFromServer(
       }))
     : []
 
-  const categories: ProductCategory[] = ((catData?.categories ?? []) as string[])
-    .filter(Boolean)
-    .map((name) => ({ id: slugify(name), name }))
+  // Category ids are slugs, and slugify lowercases — so names that differ only
+  // by case ("Waste" / "waste") collapse to one id. Dedupe here rather than
+  // letting two same-id rows reach the local write, keeping the first spelling.
+  const categoryById = new Map<string, ProductCategory>()
+  for (const name of ((catData?.categories ?? []) as string[]).filter(Boolean)) {
+    const id = slugify(name)
+    if (!categoryById.has(id)) categoryById.set(id, { id, name })
+  }
+  const categories: ProductCategory[] = [...categoryById.values()]
 
   report({
     categoriesLoaded: categories.length,

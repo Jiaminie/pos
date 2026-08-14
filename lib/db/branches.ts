@@ -1,5 +1,5 @@
 import type { Branch } from '../types'
-import { openDb } from './idb'
+import { openDb, settleTx } from './idb'
 
 export async function getAll(): Promise<Branch[]> {
   const db = await openDb()
@@ -31,8 +31,7 @@ export async function upsertMany(branches: Branch[]): Promise<void> {
     const tx = db.transaction('branches', 'readwrite')
     const store = tx.objectStore('branches')
     for (const branch of branches) store.put(branch)
-    tx.oncomplete = () => resolve()
-    tx.onerror    = () => reject(tx.error)
+    settleTx(tx, resolve, reject)
   })
 }
 
@@ -42,8 +41,7 @@ export async function replaceAll(branches: Branch[]): Promise<void> {
     const tx = db.transaction('branches', 'readwrite')
     const store = tx.objectStore('branches')
     store.clear()
-    for (const branch of branches) store.add(branch)
-    tx.oncomplete = () => resolve()
-    tx.onerror    = () => reject(tx.error)
+    for (const branch of branches) store.put(branch)
+    settleTx(tx, resolve, reject)
   })
 }

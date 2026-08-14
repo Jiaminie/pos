@@ -1,4 +1,4 @@
-import { openDb } from './idb'
+import { openDb, settleTx } from './idb'
 import { toast } from 'sonner'
 
 export type ProductSyncItem = {
@@ -21,8 +21,7 @@ export async function push(item: ProductSyncItem): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction('productSyncQueue', 'readwrite')
     tx.objectStore('productSyncQueue').put(item)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
+    settleTx(tx, resolve, reject)
   })
 }
 
@@ -31,8 +30,7 @@ async function remove(id: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction('productSyncQueue', 'readwrite')
     tx.objectStore('productSyncQueue').delete(id)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
+    settleTx(tx, resolve, reject)
   })
 }
 

@@ -1,5 +1,5 @@
 import type { Unit } from '../types'
-import { openDb } from './idb'
+import { openDb, settleTx } from './idb'
 
 export async function getAll(): Promise<Unit[]> {
   const db = await openDb()
@@ -17,8 +17,7 @@ export async function upsertMany(units: Unit[]): Promise<void> {
     const tx = db.transaction('units', 'readwrite')
     const store = tx.objectStore('units')
     for (const u of units) store.put(u)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
+    settleTx(tx, resolve, reject)
   })
 }
 
@@ -28,9 +27,8 @@ export async function replaceAll(units: Unit[]): Promise<void> {
     const tx = db.transaction('units', 'readwrite')
     const store = tx.objectStore('units')
     store.clear()
-    for (const u of units) store.add(u)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
+    for (const u of units) store.put(u)
+    settleTx(tx, resolve, reject)
   })
 }
 

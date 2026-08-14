@@ -1,5 +1,5 @@
 import type { InventoryTransaction } from '../types'
-import { openDb } from './idb'
+import { openDb, settleTx } from './idb'
 import { getDeviceId } from '../device'
 import { getMyBranchId } from '../branch'
 import { removeMany as removeTransactions } from './transactions'
@@ -16,8 +16,7 @@ export async function push(item: InventoryTransaction): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction('syncQueue', 'readwrite')
     tx.objectStore('syncQueue').put(item) // put not add — idempotent on retry
-    tx.oncomplete = () => resolve()
-    tx.onerror    = () => reject(tx.error)
+    settleTx(tx, resolve, reject)
   })
 }
 
@@ -28,8 +27,7 @@ export async function pushMany(items: InventoryTransaction[]): Promise<void> {
     const tx = db.transaction('syncQueue', 'readwrite')
     const store = tx.objectStore('syncQueue')
     for (const item of items) store.put(item)
-    tx.oncomplete = () => resolve()
-    tx.onerror    = () => reject(tx.error)
+    settleTx(tx, resolve, reject)
   })
 }
 
@@ -104,8 +102,7 @@ export async function drain(batchSize = 100): Promise<{ droppedIds: string[] }> 
       const tx = db.transaction('syncQueue', 'readwrite')
       const store = tx.objectStore('syncQueue')
       deleteIds.forEach((id) => store.delete(id))
-      tx.oncomplete = () => resolve()
-      tx.onerror    = () => reject(tx.error)
+      settleTx(tx, resolve, reject)
     })
   }
 

@@ -1,5 +1,5 @@
 import type { InventoryTransaction } from '../types'
-import { openDb } from './idb'
+import { openDb, settleTx } from './idb'
 
 export async function getAll(): Promise<InventoryTransaction[]> {
   const db = await openDb()
@@ -15,8 +15,7 @@ export async function clearAll(): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction('transactions', 'readwrite')
     tx.objectStore('transactions').clear()
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
+    settleTx(tx, resolve, reject)
   })
 }
 
@@ -51,7 +50,7 @@ export async function createMany(items: InventoryTransaction[]): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const idbTx = db.transaction('transactions', 'readwrite')
     const store = idbTx.objectStore('transactions')
-    for (const item of items) store.add(item)
+    for (const item of items) store.put(item)
     idbTx.oncomplete = () => resolve()
     idbTx.onerror = () => reject(idbTx.error)
   })

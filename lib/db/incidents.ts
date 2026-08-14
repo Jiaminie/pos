@@ -1,5 +1,5 @@
 import type { Incident } from '../types'
-import { openDb } from './idb'
+import { openDb, settleTx } from './idb'
 import { getDeviceId } from '../device'
 
 export async function getAll(): Promise<Incident[]> {
@@ -16,8 +16,7 @@ export async function create(incident: Incident): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction('incidents', 'readwrite')
     tx.objectStore('incidents').add(incident)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
+    settleTx(tx, resolve, reject)
   })
 }
 
@@ -27,9 +26,8 @@ export async function createMany(items: Incident[]): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction('incidents', 'readwrite')
     const store = tx.objectStore('incidents')
-    for (const item of items) store.add(item)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
+    for (const item of items) store.put(item)
+    settleTx(tx, resolve, reject)
   })
 }
 
@@ -38,8 +36,7 @@ export async function push(incident: Incident): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction('incidentQueue', 'readwrite')
     tx.objectStore('incidentQueue').put(incident)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
+    settleTx(tx, resolve, reject)
   })
 }
 
@@ -50,8 +47,7 @@ export async function pushMany(items: Incident[]): Promise<void> {
     const tx = db.transaction('incidentQueue', 'readwrite')
     const store = tx.objectStore('incidentQueue')
     for (const item of items) store.put(item)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
+    settleTx(tx, resolve, reject)
   })
 }
 
@@ -93,8 +89,7 @@ export async function drain(batchSize = 100): Promise<void> {
       const tx = db.transaction('incidentQueue', 'readwrite')
       const store = tx.objectStore('incidentQueue')
       syncedIds.forEach((id) => store.delete(id))
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => reject(tx.error)
+      settleTx(tx, resolve, reject)
     })
   }
 }
