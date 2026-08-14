@@ -37,12 +37,12 @@ import {
 } from '@/lib/device-ui'
 import { INCIDENT_REASON_LABELS } from '@/lib/types'
 import { fetchSettings, type PosLookupMode } from '@/lib/settings'
-import { DEFAULT_BANK_OPTIONS, methodLabel, type SalePaymentInput } from '@/lib/payments'
+import { DEFAULT_BANK_OPTIONS, methodLabel, parseBankOptions, type SalePaymentInput } from '@/lib/payments'
 import PaymentSheet from '@/components/pos/PaymentSheet'
 import { canDiscount, clampCartUnitPrice, clampUnitPrice, DEFAULT_MIN_MARKUP_PERCENT, discountPerUnit, effectiveLowestPrice } from '@/lib/pricing'
 import { applyCartDiscount, maxCartDiscount } from '@/lib/pricing-cart'
 import { getCachedAuthUser, hasPermission, type AuthUser } from '@/lib/auth'
-import { getMyBranchId } from '@/lib/branch'
+import { getMyBranchId, getMyBranchIdentity } from '@/lib/branch'
 import type { Product, ProductCategory, InventoryTransaction, IncidentReason, SaleLine } from '@/lib/types'
 
 type CartItem = Product & { qty: number; unitPrice: number }
@@ -223,7 +223,10 @@ export default function POSPage() {
     fetchSettings().then((s) => {
       setMinMarkupPercent(s.minMarkupPercent)
       setPosLookupMode(s.posLookupMode)
-      setBankOptions(s.bankOptions)
+      // Offer this branch's own bank accounts; the org list is the fallback for
+      // branches that have not set their own (and for single-branch stores).
+      const branchBanks = parseBankOptions(getMyBranchIdentity()?.bankOptions)
+      setBankOptions(branchBanks.length > 0 ? branchBanks : s.bankOptions)
     }).catch(() => {})
   }, [])
 

@@ -5,6 +5,7 @@ import { Building2, Check, FileText, GitBranch, Loader2, Mail, MapPin, Monitor, 
 import { toast } from 'sonner'
 import { fetchSettings, saveSettings, SettingsSaveError, fetchEmailSettings, saveEmailSettings, DEFAULT_SETTINGS, DEFAULT_EMAIL_SETTINGS, POS_LOOKUP_MODES, RECEIPT_FORMATS, type PDFSettings, type EmailSettings, type PosLookupMode, type ReceiptFormat } from '@/lib/settings'
 import { getMyBranchId, getMyOrgId, setMyBranchId } from '@/lib/branch'
+import { parseBankOptions } from '@/lib/payments'
 import { getAll as getLocalBranches } from '@/lib/db/branches'
 import type { Branch } from '@/lib/types'
 import { TeamSection } from '@/components/settings/TeamSection'
@@ -38,6 +39,8 @@ type SettingsTab = 'store' | 'pricing' | 'pos' | 'receipts' | 'documents' | 'ema
 // Tabs backed by the org-wide storeSettings record (PATCH /api/settings), which
 // requires the owner-only admin.settings. Branches/team/permissions have their
 // own guards; device is local to this machine, so any signed-in user keeps it.
+type BranchReceiptDraft = { paymentDetails: string; bankOptions: string[] }
+
 const STORE_SETTINGS_TABS: SettingsTab[] = ['store', 'pricing', 'pos', 'receipts', 'documents', 'email']
 
 const TABS: { id: SettingsTab; label: string; description: string; icon: typeof Building2 }[] = [
@@ -94,6 +97,15 @@ export default function SettingsPage() {
   // Bank accounts editor state
   const [newBankName, setNewBankName] = useState('')
 
+  // Per-branch receipt overrides. Each branch banks its own takings, so these
+  // must be edited one branch at a time — never written to the shared record.
+  const [receiptBranchId, setReceiptBranchId] = useState('')
+  // Keyed by branch so switching branches mid-edit cannot carry one branch's
+  // till over to another, and unsaved edits survive the switch.
+  const [branchDrafts, setBranchDrafts] = useState<Record<string, BranchReceiptDraft>>({})
+  const [newBranchBankName, setNewBranchBankName] = useState('')
+  const [branchReceiptSaving, setBranchReceiptSaving] = useState(false)
+
   // Every tab is hidden unless the user can actually act on it. A tab nobody
   // can use is worse than a missing one: it invites edits that the server
   // rejects, or opens to a blank panel.
@@ -134,9 +146,63 @@ export default function SettingsPage() {
   }, [])
 
   useEffect(() => {
-    if ((effectiveTab === 'branches' || effectiveTab === 'team' || effectiveTab === 'device') && branches.length === 0) loadBranches()
+    if ((effectiveTab === 'branches' || effectiveTab === 'team' || effectiveTab === 'device' || effectiveTab === 'receipts') && branches.length === 0) loadBranches()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveTab])
+
+  // Derived, not stored in an effect — the selection falls back to this device's
+  // branch, then the first branch, without a setState-during-effect cascade.
+  const selectedBranchId = receiptBranchId || getMyBranchId() || branches[0]?.id || ''
+  const selectedBranch = branches.find((b) => b.id === selectedBranchId)
+  const branchDraft: BranchReceiptDraft = branchDrafts[selectedBranchId] ?? {
+    paymentDetails: selectedBranch?.paymentDetails ?? '',
+    bankOptions: parseBankOptions(selectedBranch?.bankOptions),
+  }
+
+  function updateBranchDraft(patch: Partial<BranchReceiptDraft>) {
+    if (!selectedBranchId) return
+    setBranchDrafts((prev) => ({ ...prev, [selectedBranchId]: { ...branchDraft, ...patch } }))
+  }
+
+  function addBranchBank() {
+    const name = newBranchBankName.trim()
+    if (!name || branchDraft.bankOptions.includes(name)) return
+    updateBranchDraft({ bankOptions: [...branchDraft.bankOptions, name] })
+    setNewBranchBankName('')
+  }
+
+  async function saveBranchReceipt() {
+    if (!selectedBranchId) return
+    setBranchReceiptSaving(true)
+    try {
+      const res = await fetch(`/api/branches/${selectedBranchId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paymentDetails: branchDraft.paymentDetails,
+          bankOptions: branchDraft.bankOptions,
+        }),
+      })
+      const { data, error } = await res.json()
+      if (!res.ok) throw new Error(error ?? `HTTP ${res.status}`)
+      setBranches((prev) => prev.map((b) => (b.id === data.id ? data : b)))
+      // Drop the draft so the row now renders from the saved server value.
+      setBranchDrafts((prev) => {
+        const next = { ...prev }
+        delete next[data.id]
+        return next
+      })
+      toast.success(`${data.name} payment details saved`, {
+        description: 'Only this branch is affected. Its devices apply it on next sync.',
+      })
+    } catch (err) {
+      toast.error('Could not save branch payment details', {
+        description: err instanceof Error ? err.message : 'Try again.',
+      })
+    } finally {
+      setBranchReceiptSaving(false)
+    }
+  }
 
   async function loadBranches() {
     setBranchesLoading(true)
@@ -839,6 +905,100 @@ export default function SettingsPage() {
                         Add
                       </button>
                     </div>
+                  </div>
+
+                  <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-amber-900">Per-branch payment details</label>
+                      <p className="mt-0.5 text-xs text-amber-800">
+                        The fields above are shared by every branch. Set a branch&rsquo;s own till or paybill here —
+                        it overrides the shared block on that branch&rsquo;s receipts only. Leave blank to use the shared one.
+                      </p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-medium text-gray-700">Branch</label>
+                      <select
+                        value={selectedBranchId}
+                        onChange={(e) => setReceiptBranchId(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        {branches.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.name} ({b.code}){b.paymentDetails?.trim() ? '' : ' — using shared'}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-medium text-gray-700">Payment details for this branch</label>
+                      <textarea
+                        value={branchDraft.paymentDetails}
+                        onChange={(e) => updateBranchDraft({ paymentDetails: e.target.value })}
+                        placeholder={'Till: 998877\nPaybill: 400200\nAccount: 2004'}
+                        maxLength={500}
+                        rows={4}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y min-h-[5.5rem]"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-medium text-gray-700">Bank accounts for this branch</label>
+                      <div className="flex flex-wrap gap-2">
+                        {branchDraft.bankOptions.map((bank) => (
+                          <span
+                            key={bank}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700"
+                          >
+                            {bank}
+                            <button
+                              type="button"
+                              aria-label={`Remove ${bank}`}
+                              onClick={() => updateBranchDraft({ bankOptions: branchDraft.bankOptions.filter((b) => b !== bank) })}
+                              className="p-0.5 rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                            >
+                              <X size={14} />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={newBranchBankName}
+                          onChange={(e) => setNewBranchBankName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key !== 'Enter') return
+                            e.preventDefault()
+                            addBranchBank()
+                          }}
+                          placeholder="e.g. Standard Chartered"
+                          className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={addBranchBank}
+                          className="inline-flex items-center gap-1.5 border border-gray-300 bg-white px-3 py-2 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                        >
+                          <Plus size={15} />
+                          Add
+                        </button>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={saveBranchReceipt}
+                      disabled={branchReceiptSaving || !selectedBranchId}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-amber-700 disabled:opacity-50"
+                    >
+                      {branchReceiptSaving ? <Loader2 size={14} className="animate-spin" /> : null}
+                      Save this branch
+                    </button>
+                    <p className="text-[11px] text-amber-800">
+                      Saved separately from the Save button above — that one never touches branch overrides.
+                    </p>
                   </div>
 
                   <div className="space-y-1.5">

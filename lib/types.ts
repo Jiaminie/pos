@@ -23,6 +23,10 @@ export type Branch = {
   code: string
   isPrimary: boolean
   address?: string
+  /** Receipt till/paybill block for this branch. Empty = use StoreSettings. */
+  paymentDetails?: string
+  /** Comma-separated bank names for this branch. Empty = use StoreSettings. */
+  bankOptions?: string
 }
 
 export type TransferStatus = 'PENDING' | 'IN_TRANSIT' | 'RECEIVED' | 'REJECTED' | 'REVERSED'

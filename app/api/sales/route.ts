@@ -62,10 +62,13 @@ export async function POST(request: NextRequest) {
         .map((p) => p.bankName as string)
       if (newBanks.length > 0) {
         try {
-          const s = await prisma.storeSettings.findFirst({ where: { organizationId: user.orgId } })
-          const merged = serializeBankOptions([...parseBankOptions(s?.bankOptions), ...newBanks])
-          if (s && merged !== s.bankOptions) {
-            await prisma.storeSettings.update({ where: { id: s.id }, data: { bankOptions: merged } })
+          // Learn the bank onto the branch that took the payment, not the org.
+          // Merging into StoreSettings put one branch's bank in every other
+          // branch's payment sheet.
+          const b = await prisma.branch.findUnique({ where: { id: branchId } })
+          const merged = serializeBankOptions([...parseBankOptions(b?.bankOptions), ...newBanks])
+          if (b && merged !== b.bankOptions) {
+            await prisma.branch.update({ where: { id: b.id }, data: { bankOptions: merged } })
           }
         } catch {
           /* non-fatal: the sale is already committed */

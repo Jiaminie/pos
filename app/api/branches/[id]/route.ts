@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/server/db'
 import { requireUser, isAuthUser, requireUserWithPermission } from '@/lib/server/auth/guard'
+import { serializeBankOptions } from '@/lib/payments'
 
 export async function PATCH(
   request: NextRequest,
@@ -12,7 +13,7 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
-    const { name, code, address, isPrimary } = body
+    const { name, code, address, isPrimary, paymentDetails, bankOptions } = body
 
     const branch = await prisma.branch.findUnique({ where: { id } })
     if (!branch || branch.archived) {
@@ -58,6 +59,14 @@ export async function PATCH(
         ...(name !== undefined     && { name: name.trim() }),
         ...(code !== undefined     && { code: (code as string).trim().toUpperCase() }),
         ...(address !== undefined  && { address: address?.trim() || null }),
+        // Receipt overrides — empty string means "fall back to StoreSettings",
+        // so these are stored as-is rather than coerced to null.
+        ...(paymentDetails !== undefined && { paymentDetails: String(paymentDetails).slice(0, 500) }),
+        ...(bankOptions !== undefined && {
+          bankOptions: serializeBankOptions(
+            Array.isArray(bankOptions) ? bankOptions.map(String) : String(bankOptions).split(','),
+          ),
+        }),
       },
     })
 

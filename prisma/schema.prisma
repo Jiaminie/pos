@@ -49,6 +49,11 @@ model Branch {
   isPrimary      Boolean  @default(false) @map("is_primary")
   address        String?
   archived       Boolean  @default(false)
+  // Per-branch receipt overrides. Branches take payment on their own till /
+  // paybill, so these must not be shared: editing one branch's must never
+  // reroute another's money. Empty string means "fall back to StoreSettings".
+  paymentDetails String   @default("") @map("payment_details")
+  bankOptions    String   @default("") @map("bank_options")
   createdAt      DateTime @default(now()) @map("created_at")
 
   organization  Organization           @relation(fields: [organizationId], references: [id])

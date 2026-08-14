@@ -6,7 +6,7 @@ import { upsertMany as upsertBranches, replaceAll as replaceBranches } from './b
 import { upsertMany as upsertTransfers } from './transfers'
 import { upsertMany as upsertTransactions } from './transactions'
 import { inferBrand, normalizeBrand } from '../brands'
-import { getMyBranchId } from '../branch'
+import { getMyBranchId, cacheMyBranchIdentity } from '../branch'
 import type { Product, ProductCategory, Unit, Organization, Branch, StockTransfer, InventoryTransaction, TransactionType } from '../types'
 import type { CatalogSyncProgress } from './sync-progress'
 import { initialSyncProgress } from './sync-progress'
@@ -312,13 +312,13 @@ export async function syncFromServer(options: SyncOptions = {}): Promise<boolean
       await replaceProducts(products)
       if (units.length > 0)         await replaceUnits(units)
       if (organizations.length > 0) await replaceOrganizations(organizations)
-      if (branches.length > 0)      await replaceBranches(branches)
+      if (branches.length > 0)    { await replaceBranches(branches); cacheMyBranchIdentity(branches) }
     } else {
       if (categories.length > 0)    await upsertCategories(categories)
       if (products.length > 0)      await upsertProducts(products)
       if (units.length > 0)         await upsertUnits(units)
       if (organizations.length > 0) await upsertOrganizations(organizations)
-      if (branches.length > 0)      await upsertBranches(branches)
+      if (branches.length > 0)    { await upsertBranches(branches); cacheMyBranchIdentity(branches) }
     }
     if (transfers.length > 0) await upsertTransfers(transfers)
     // Merge by id — never clear. Preserves this device's not-yet-uploaded
@@ -416,7 +416,7 @@ export async function replaceCatalogFromServer(
     await step('products', () => replaceProducts(products))
     if (units.length > 0)         await step('units', () => replaceUnits(units))
     if (organizations.length > 0) await step('organizations', () => replaceOrganizations(organizations))
-    if (branches.length > 0)      await step('branches', () => replaceBranches(branches))
+    if (branches.length > 0)    { await step('branches', () => replaceBranches(branches)); cacheMyBranchIdentity(branches) }
     if (transfers.length > 0)     await step('transfers', () => upsertTransfers(transfers))
     // Merge the server movement log by id (don't wipe — keeps un-uploaded
     // local sales). Opening stock stays in product.quantity, so this never

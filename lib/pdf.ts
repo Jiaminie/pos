@@ -1,6 +1,28 @@
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { loadSettings, hexToRgb, receiptWidthMm, type PDFSettings } from './settings'
+import { getMyBranchIdentity } from './branch'
+
+/** Org settings plus the identity line for the branch that printed this doc. */
+type RenderSettings = PDFSettings & { branchLine?: string }
+
+/**
+ * Resolve org-wide settings against the device's branch.
+ *
+ * Branches take payment on their own till/paybill, so paymentDetails must come
+ * from the branch when it has one — printing the org-wide block on a branch
+ * receipt sends the customer's money to the wrong account. A blank branch value
+ * falls back to the org setting, which is what single-branch stores use.
+ */
+function resolveBranchSettings(settings: PDFSettings): RenderSettings {
+  const branch = getMyBranchIdentity()
+  if (!branch) return settings
+  return {
+    ...settings,
+    paymentDetails: branch.paymentDetails.trim() || settings.paymentDetails,
+    branchLine: [branch.name, branch.address].map((s) => s.trim()).filter(Boolean).join(' — '),
+  }
+}
 
 // ─── print ──────────────────────────────────────────────────────────────────
 
@@ -55,7 +77,7 @@ function drawHeader(
   doc: jsPDF,
   title: string,
   subtitle: string,
-  settings: PDFSettings,
+  settings: RenderSettings,
 ): number {
   const primary = hexToRgb(settings.primaryColor)
   let y = MARGIN
@@ -82,6 +104,14 @@ function drawHeader(
   doc.setTextColor(...GRAY_TXT)
   doc.text(subtitle, textX, y)
   y += 5
+
+  // Which branch issued this — without it, receipts from every branch are
+  // indistinguishable on paper.
+  if (settings.branchLine) {
+    doc.setFontSize(8.5)
+    doc.text(settings.branchLine, textX, y)
+    y += 5
+  }
 
   // Blue rule
   doc.setDrawColor(...primary)
@@ -201,7 +231,7 @@ export interface QuotationData {
 }
 
 export function generateQuotationPDF(data: QuotationData): jsPDF {
-  const settings = loadSettings()
+  const settings = resolveBranchSettings(loadSettings())
   const primary  = hexToRgb(settings.primaryColor)
   const cur      = settings.currency
 
@@ -342,7 +372,7 @@ interface ThermalDoc {
  * Draw a single-column receipt sized for a thermal roll. Returns the final y
  * so the page can be sized to its content (no trailing blank feed).
  */
-function drawThermal(doc: jsPDF, data: ThermalDoc, settings: PDFSettings, width: number): number {
+function drawThermal(doc: jsPDF, data: ThermalDoc, settings: RenderSettings, width: number): number {
   const cur     = settings.currency
   const primary = hexToRgb(settings.primaryColor)
   const m       = width >= 80 ? 5 : 4   // side margin
@@ -375,6 +405,18 @@ function drawThermal(doc: jsPDF, data: ThermalDoc, settings: PDFSettings, width:
   ;(doc.splitTextToSize(settings.companyName, width - 2 * m) as string[]).forEach((l) => {
     doc.text(l, width / 2, y, { align: 'center' }); y += 5.5
   })
+
+  // Which branch issued this — without it, receipts from every branch are
+  // indistinguishable on paper.
+  if (settings.branchLine) {
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(7.5)
+    doc.setTextColor(...GRAY_TXT)
+    ;(doc.splitTextToSize(settings.branchLine, width - 2 * m) as string[]).forEach((l) => {
+      doc.text(l, width / 2, y, { align: 'center' }); y += 3.6
+    })
+    doc.setTextColor(...DARK)
+  }
 
   if (settings.tagline) {
     doc.setFont('helvetica', 'normal')
@@ -498,7 +540,7 @@ function drawThermal(doc: jsPDF, data: ThermalDoc, settings: PDFSettings, width:
 }
 
 /** Build a thermal-roll PDF sized to its content height. */
-function buildThermalPDF(data: ThermalDoc, settings: PDFSettings, width: number): jsPDF {
+function buildThermalPDF(data: ThermalDoc, settings: RenderSettings, width: number): jsPDF {
   // Pass 1 — measure on a tall scratch page.
   const scratch = new jsPDF({ unit: 'mm', format: [width, 2000] })
   const height  = drawThermal(scratch, data, settings, width)
@@ -526,7 +568,7 @@ export interface ReceiptData {
 }
 
 export function generateReceiptPDF(data: ReceiptData): jsPDF {
-  const settings = loadSettings()
+  const settings = resolveBranchSettings(loadSettings())
   const primary  = hexToRgb(settings.primaryColor)
   const cur      = settings.currency
 
