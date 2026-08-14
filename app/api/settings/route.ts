@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/server/db'
 import { defaultPosLookupMode, parsePosLookupMode, parseReceiptFormat } from '@/lib/settings'
 import { requireUser, isAuthUser, requireUserWithPermission } from '@/lib/server/auth/guard'
+import { serializeBankOptions } from '@/lib/payments'
 
 const SINGLETON_ID = 'singleton'
 
@@ -27,7 +28,10 @@ export async function PATCH(req: Request) {
 
   try {
     const body = await req.json()
-    const { companyName, tagline, logoDataUrl, primaryColor, currency, footerText, minMarkupPercent, posLookupMode, receiptFormat, receiptTitle, paymentDetails, resendApiKey, reportEmail, fromEmail } = body
+    const { companyName, tagline, logoDataUrl, primaryColor, currency, footerText, minMarkupPercent, posLookupMode, receiptFormat, receiptTitle, paymentDetails, bankOptions, resendApiKey, reportEmail, fromEmail } = body
+
+    const normBankOptions = (v: unknown) =>
+      serializeBankOptions(Array.isArray(v) ? v.map(String) : String(v).split(','))
 
     const settings = await prisma.storeSettings.upsert({
       where: { id: SINGLETON_ID },
@@ -43,6 +47,7 @@ export async function PATCH(req: Request) {
         ...(receiptFormat !== undefined && { receiptFormat: parseReceiptFormat(receiptFormat) }),
         ...(receiptTitle  !== undefined && { receiptTitle: String(receiptTitle).slice(0, 40) }),
         ...(paymentDetails !== undefined && { paymentDetails: String(paymentDetails).slice(0, 500) }),
+        ...(bankOptions   !== undefined && { bankOptions: normBankOptions(bankOptions) }),
         ...(resendApiKey  !== undefined && { resendApiKey: String(resendApiKey) }),
         ...(reportEmail   !== undefined && { reportEmail:  String(reportEmail) }),
         ...(fromEmail     !== undefined && { fromEmail:    String(fromEmail) }),
@@ -60,6 +65,7 @@ export async function PATCH(req: Request) {
         receiptFormat: parseReceiptFormat(receiptFormat),
         receiptTitle: receiptTitle ? String(receiptTitle).slice(0, 40) : 'RECEIPT',
         paymentDetails: paymentDetails != null ? String(paymentDetails).slice(0, 500) : '',
+        bankOptions: bankOptions != null ? normBankOptions(bankOptions) : 'Cooperative Bank,Equity Bank',
         resendApiKey: resendApiKey ?? '',
         reportEmail:  reportEmail  ?? '',
         fromEmail:    fromEmail    ?? '',

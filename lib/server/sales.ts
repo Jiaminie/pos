@@ -4,6 +4,7 @@ import {
   discountPerUnit,
   effectiveLowestPrice,
 } from '@/lib/pricing'
+import { reconcilePayments, type SalePaymentInput } from '@/lib/payments'
 
 export type SaleLineInput = {
   id?: string
@@ -20,6 +21,7 @@ export type SaleInput = {
   deviceId: string
   lines: SaleLineInput[]
   saleDiscountAmount?: number
+  payments?: SalePaymentInput[]
   createdAt?: string
 }
 
@@ -95,12 +97,16 @@ export async function validateAndBuildSale(
 
   if (total < 0) throw new Error('Sale total cannot be negative')
 
+  const reconciled = reconcilePayments(input.payments, total)
+
   return {
     subtotal,
     lineDiscountTotal,
     saleDiscountAmount,
     total,
     lines: validatedLines,
+    payments: reconciled.payments,
+    paymentAdjustment: reconciled.adjusted, // non-zero ⇒ client tenders didn't match server total
     cashierId,
     organizationId,
     branchId: input.branchId,
@@ -158,6 +164,24 @@ export async function createSaleRecord(
           syncedAt: new Date(),
         },
       })
+    }
+
+    if (!existing) {
+      for (const p of built.payments) {
+        await tx.salePayment.upsert({
+          where: { id: p.id },
+          update: {},
+          create: {
+            id: p.id,
+            saleId: sale.id,
+            method: p.method,
+            bankName: p.bankName,
+            amount: p.amount,
+            reference: p.reference,
+            createdAt: built.createdAt,
+          },
+        })
+      }
     }
 
     return { sale, created: !existing }

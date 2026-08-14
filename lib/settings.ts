@@ -1,3 +1,5 @@
+import { DEFAULT_BANK_OPTIONS, parseBankOptions, serializeBankOptions } from './payments'
+
 export type PosLookupMode = 'catalog' | 'barcode' | 'hybrid'
 
 export const POS_LOOKUP_MODES: {
@@ -85,6 +87,8 @@ export interface PDFSettings {
   receiptTitle: string
   /** Paybill, Till, M-Pesa, or bank details printed on receipts & quotations. */
   paymentDetails: string
+  /** Bank account names offered in the POS payment sheet (CSV on the wire). */
+  bankOptions: string[]
 }
 
 export const DEFAULT_SETTINGS: PDFSettings = {
@@ -99,6 +103,7 @@ export const DEFAULT_SETTINGS: PDFSettings = {
   receiptFormat: 'a4',
   receiptTitle: 'RECEIPT',
   paymentDetails: '',
+  bankOptions: DEFAULT_BANK_OPTIONS,
 }
 
 const KEY = 'pos-pdf-settings'
@@ -117,6 +122,7 @@ export function loadSettings(): PDFSettings {
       receiptFormat: parseReceiptFormat(parsed.receiptFormat),
       receiptTitle: typeof parsed.receiptTitle === 'string' ? parsed.receiptTitle : DEFAULT_SETTINGS.receiptTitle,
       paymentDetails: typeof parsed.paymentDetails === 'string' ? parsed.paymentDetails : DEFAULT_SETTINGS.paymentDetails,
+      bankOptions: Array.isArray(parsed.bankOptions) ? parsed.bankOptions : DEFAULT_SETTINGS.bankOptions,
     }
   } catch {
     return DEFAULT_SETTINGS
@@ -147,6 +153,10 @@ export async function fetchSettings(): Promise<PDFSettings> {
       receiptFormat: parseReceiptFormat(data.receiptFormat),
       receiptTitle: data.receiptTitle ?? DEFAULT_SETTINGS.receiptTitle,
       paymentDetails: data.paymentDetails ?? DEFAULT_SETTINGS.paymentDetails,
+      bankOptions: (() => {
+        const parsed = parseBankOptions(data.bankOptions)
+        return parsed.length > 0 ? parsed : DEFAULT_SETTINGS.bankOptions
+      })(),
     }
     cacheSettings(s)
     return s
@@ -161,7 +171,7 @@ export async function saveSettings(s: PDFSettings): Promise<void> {
   const res = await fetch('/api/settings', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(s),
+    body: JSON.stringify({ ...s, bankOptions: serializeBankOptions(s.bankOptions) }),
   })
   if (!res.ok) throw new Error('Failed to save settings'  )
 }

@@ -28,10 +28,12 @@ export function recordFailedAttempt(branchId: string, caller: string): number {
   entry.fails += 1
   if (entry.fails >= MAX_ATTEMPTS) {
     entry.lockedUntil = Date.now() + LOCKOUT_MS
-    entry.fails = 0
   }
   attempts.set(k, entry)
-  return MAX_ATTEMPTS - entry.fails
+  // Do NOT reset fails here — that made this return MAX_ATTEMPTS, so the
+  // caller cheerfully reported "5 attempts remaining" at the exact moment
+  // the lockout tripped. isLockedOut() clears the entry once it expires.
+  return Math.max(0, MAX_ATTEMPTS - entry.fails)
 }
 
 export function clearAttempts(branchId: string, caller: string): void {

@@ -1,4 +1,5 @@
 import type { SaleLine } from '../types'
+import type { SalePaymentInput } from '../payments'
 import { openDb } from './idb'
 
 export type Sale = {
@@ -13,6 +14,8 @@ export type Sale = {
   createdAt: string
   /** True when the sale was rung up while the device was offline. */
   wasOffline?: boolean
+  /** Tenders that paid for this sale; sums to `total`. */
+  payments: SalePaymentInput[]
   lines: SaleLine[]
 }
 

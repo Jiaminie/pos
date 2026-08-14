@@ -81,6 +81,9 @@ export default function SettingsPage() {
   const [showTeamTab, setShowTeamTab] = useState(false)
   const [showPermissionsTab, setShowPermissionsTab] = useState(false)
 
+  // Bank accounts editor state
+  const [newBankName, setNewBankName] = useState('')
+
   function tabVisible(t: (typeof TABS)[number]) {
     if (t.id === 'team' && !showTeamTab) return false
     if (t.id === 'permissions' && !showPermissionsTab) return false
@@ -272,6 +275,18 @@ export default function SettingsPage() {
   function set<K extends keyof PDFSettings>(key: K, value: PDFSettings[K]) {
     setSettings((prev) => ({ ...prev, [key]: value }))
     setSaved(false)
+  }
+
+  function addBank() {
+    const name = newBankName.trim()
+    if (!name) return
+    const current = settings.bankOptions ?? []
+    if (current.some((b) => b.toLowerCase() === name.toLowerCase())) {
+      toast.error('That bank is already in the list')
+      return
+    }
+    set('bankOptions', [...current, name])
+    setNewBankName('')
   }
 
   function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -722,6 +737,54 @@ export default function SettingsPage() {
                     <p className="text-xs text-gray-400">
                       Printed on receipts and quotations — e.g. M-Pesa Paybill, Till number, or bank account details. Leave blank to hide.
                     </p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-gray-700">Bank accounts</label>
+                    <p className="text-xs text-gray-400">
+                      Names offered to cashiers in the POS payment sheet when split-payments include a bank transfer.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {(settings.bankOptions ?? []).map((bank) => (
+                        <span
+                          key={bank}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-gray-50 px-3 py-1.5 text-sm text-gray-700"
+                        >
+                          {bank}
+                          <button
+                            type="button"
+                            aria-label={`Remove ${bank}`}
+                            onClick={() => set('bankOptions', (settings.bankOptions ?? []).filter((b) => b !== bank))}
+                            className="p-0.5 rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                          >
+                            <X size={14} />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newBankName}
+                        onChange={(e) => setNewBankName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            addBank()
+                          }
+                        }}
+                        placeholder="e.g. Standard Chartered"
+                        className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={addBank}
+                        className="inline-flex items-center gap-1.5 border border-gray-300 px-3 py-2 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                      >
+                        <Plus size={15} />
+                        Add
+                      </button>
+                    </div>
                   </div>
 
                   <div className="space-y-1.5">

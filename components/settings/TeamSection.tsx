@@ -133,19 +133,37 @@ export function TeamSection({ branches }: { branches: Branch[] }) {
 
   function resetPin(user: PendingTeamUser) {
     if (user.pending) { toast.error('Still syncing — try again in a moment'); return }
+
+    // A stray click here used to replace someone's PIN with a random one
+    // instantly. The new PIN is shown exactly once, so an unconfirmed reset on
+    // your own row locks you out of your account permanently.
+    const isSelf = user.id === authUser?.userId
+    const warning = isSelf
+      ? `Reset your OWN PIN, "${user.name}"?\n\nYou will be signed out and must use the new PIN, shown only once. Write it down before dismissing it.`
+      : `Reset the PIN for "${user.name}"?\n\nTheir current PIN stops working immediately. The new PIN is shown only once.`
+    if (!window.confirm(warning)) return
+
+    // The API requires proof of the current PIN before changing your own.
+    let currentPin: string | undefined
+    if (isSelf) {
+      currentPin = window.prompt('Enter your CURRENT PIN to confirm:')?.trim() || undefined
+      if (!currentPin) return
+    }
+
     const pin = randomPin()
-    setCreatedPin(pin)
-    toast.success(`PIN reset for ${user.name}`)
 
     fetch(`/api/users/${user.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin }),
+      body: JSON.stringify({ pin, ...(currentPin && { currentPin }) }),
     }).then(async (res) => {
       const { error } = await res.json()
       if (!res.ok) throw new Error(error)
+      // Only reveal the PIN once the server confirms it was stored. Showing it
+      // optimistically risked displaying a PIN that was never actually saved.
+      setCreatedPin(pin)
+      toast.success(`PIN reset for ${user.name}`)
     }).catch((err) => {
-      setCreatedPin(null)
       toast.error(err instanceof Error ? err.message : 'PIN reset failed — the old PIN is still active')
     })
   }

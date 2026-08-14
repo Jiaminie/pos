@@ -37,6 +37,8 @@ import {
 } from '@/lib/device-ui'
 import { INCIDENT_REASON_LABELS } from '@/lib/types'
 import { fetchSettings, type PosLookupMode } from '@/lib/settings'
+import { DEFAULT_BANK_OPTIONS, methodLabel, type SalePaymentInput } from '@/lib/payments'
+import PaymentSheet from '@/components/pos/PaymentSheet'
 import { canDiscount, clampCartUnitPrice, clampUnitPrice, DEFAULT_MIN_MARKUP_PERCENT, discountPerUnit, effectiveLowestPrice } from '@/lib/pricing'
 import { applyCartDiscount, maxCartDiscount } from '@/lib/pricing-cart'
 import { getCachedAuthUser, hasPermission, type AuthUser } from '@/lib/auth'
@@ -129,8 +131,10 @@ export default function POSPage() {
   const POS_PAGE_SIZE = 48
   const [cart, setCart] = useState<CartItem[]>([])
   const [offline, setOffline] = useState(false)
-  const [receipt, setReceipt] = useState<{ orderId: string; items: CartItem[]; totals: CartTotals } | null>(null)
+  const [receipt, setReceipt] = useState<{ orderId: string; items: CartItem[]; totals: CartTotals; payments: SalePaymentInput[] } | null>(null)
   const [checking, setChecking] = useState(false)
+  const [payFor, setPayFor] = useState<CartTotals | null>(null)
+  const [paySession, setPaySession] = useState(0)
   const [quoteOpen, setQuoteOpen] = useState(false)
   const [quoteForm, setQuoteForm] = useState<QuoteForm>({ customerName: '', customerPhone: '', note: '' })
   const [quoteSending, setQuoteSending] = useState(false)
@@ -141,6 +145,7 @@ export default function POSPage() {
   const [incidentSaving, setIncidentSaving] = useState(false)
   const [minMarkupPercent, setMinMarkupPercent] = useState(DEFAULT_MIN_MARKUP_PERCENT)
   const [posLookupMode, setPosLookupMode] = useState<PosLookupMode>('catalog')
+  const [bankOptions, setBankOptions] = useState<string[]>(DEFAULT_BANK_OPTIONS)
   const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({})
   // Per-line buying price for items with no cost/floor on record. Entering one
   // sets the line's lowest sell price so a discount becomes possible (but can't
@@ -218,6 +223,7 @@ export default function POSPage() {
     fetchSettings().then((s) => {
       setMinMarkupPercent(s.minMarkupPercent)
       setPosLookupMode(s.posLookupMode)
+      setBankOptions(s.bankOptions)
     }).catch(() => {})
   }, [])
 
@@ -690,19 +696,31 @@ export default function POSPage() {
       })), minMarkupPercent)
     : 0
   async function checkout() {
-    setChecking(true)
     const auth = getCachedAuthUser()
     const branchId = getMyBranchId()
     if (!auth || !branchId) {
       toast.error('Not signed in')
-      setChecking(false)
       return
     }
 
     const pendingPrice = cart.some((item) => canSaveItemPrice(item))
     if (pendingPrice) {
       toast.warning('Apply pending line prices before checkout')
+      return
+    }
+
+    setPayFor(computeCartTotals(cart, cartDiscountApplied, (item) => item.unitPrice))
+    setPaySession((s) => s + 1)
+  }
+
+  async function confirmSale(payments: SalePaymentInput[]) {
+    setChecking(true)
+    const auth = getCachedAuthUser()
+    const branchId = getMyBranchId()
+    if (!auth || !branchId) {
+      toast.error('Not signed in')
       setChecking(false)
+      setPayFor(null)
       return
     }
 
@@ -736,6 +754,7 @@ export default function POSPage() {
       saleDiscountAmount: cartDiscountApplied,
       total: checkoutTotals.grandTotal,
       createdAt: now,
+      payments,
       lines,
     }
 
@@ -753,13 +772,20 @@ export default function POSPage() {
       createdAt: now,
     }))
 
-    await createSale(sale)
-    await pushSale(sale)
-    await createManyTransactions(newTxs)
+    try {
+      await createSale(sale)
+      await pushSale(sale)
+      await createManyTransactions(newTxs)
+    } catch {
+      toast.error('Could not save sale — please try again')
+      setChecking(false)
+      setPayFor(null)
+      return
+    }
 
     const updatedTxs = [...allTransactions, ...newTxs]
     setAllTransactions(updatedTxs)
-    setReceipt({ orderId: saleId, items: [...cart], totals: checkoutTotals })
+    setReceipt({ orderId: saleId, items: [...cart], totals: checkoutTotals, payments })
     setCart([])
     setCartDiscountInput('')
     setCartDiscountApplied(0)
@@ -767,6 +793,7 @@ export default function POSPage() {
     setCostDrafts({})
     localStorage.removeItem('pos_cart')
     setChecking(false)
+    setPayFor(null)
     drainSales().catch(() => {})
     drain().catch(() => {})
 
@@ -817,6 +844,11 @@ export default function POSPage() {
         sku: i.sku,
         qty: i.qty,
         unitPrice: i.unitPrice,
+      })),
+      payments: (receipt.payments ?? []).map((p) => ({
+        label: methodLabel(p.method, p.bankName),
+        amount: p.amount,
+        reference: p.reference,
       })),
     })
   }
@@ -1449,6 +1481,15 @@ export default function POSPage() {
                 </div>
                 <div className="shrink-0 border-t pt-3 mt-4 space-y-3">
                   <CartTotalsBreakdown totals={receipt.totals} />
+                  {receipt.payments?.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 text-xs">
+                      {receipt.payments.map((p) => (
+                        <span key={p.id} className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-gray-700">
+                          {methodLabel(p.method, p.bankName)} {p.amount.toLocaleString()}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex justify-between font-semibold text-sm">
                     <span>Total</span>
                     <span>KES {receipt.totals.grandTotal.toLocaleString()}</span>
@@ -1473,6 +1514,20 @@ export default function POSPage() {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+
+      {/* Payment sheet */}
+      <PaymentSheet
+        key={payFor ? `pay-${paySession}` : 'pay-closed'}
+        open={!!payFor}
+        total={payFor?.grandTotal ?? 0}
+        bankOptions={bankOptions}
+        busy={checking}
+        deviceUiMode={deviceUiMode}
+        onCancel={() => {
+          setPayFor(null)
+        }}
+        onConfirm={confirmSale}
+      />
 
       {/* Quotation modal */}
       <Dialog.Root open={quoteOpen} onOpenChange={setQuoteOpen}>

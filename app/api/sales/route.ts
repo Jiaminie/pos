@@ -4,6 +4,7 @@ import { validateAndBuildSale, createSaleRecord } from '@/lib/server/sales'
 import { logAudit } from '@/lib/server/audit'
 import { alertHighDiscount } from '@/lib/server/alerts'
 import { prisma } from '@/lib/server/db'
+import { parseBankOptions, serializeBankOptions } from '@/lib/payments'
 
 // Discount past this share of the pre-discount total alerts the owner.
 const HIGH_DISCOUNT_PCT = 0.2
@@ -14,7 +15,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { id, branchId, deviceId, lines, saleDiscountAmount, createdAt, wasOffline } = body
+    const { id, branchId, deviceId, lines, saleDiscountAmount, payments, createdAt, wasOffline } = body
 
     if (!id || !branchId || !deviceId || !Array.isArray(lines) || lines.length === 0) {
       return Response.json(
@@ -27,7 +28,7 @@ export async function POST(request: NextRequest) {
     if (branchErr) return branchErr
 
     const built = await validateAndBuildSale(
-      { id, branchId, deviceId, lines, saleDiscountAmount, createdAt },
+      { id, branchId, deviceId, lines, saleDiscountAmount, payments, createdAt },
       user.userId,
       user.orgId,
     )
@@ -47,8 +48,29 @@ export async function POST(request: NextRequest) {
         targetId: sale.id,
         deviceId,
         wasOffline: Boolean(wasOffline),
-        metadata: { total: built.total, discountTotal, lines: built.lines.length },
+        metadata: {
+          total: built.total,
+          discountTotal,
+          lines: built.lines.length,
+          payments: built.payments.map((p) => ({ method: p.method, bankName: p.bankName, amount: p.amount })),
+          ...(built.paymentAdjustment !== 0 && { paymentAdjustment: built.paymentAdjustment }),
+        },
       })
+
+      const newBanks = built.payments
+        .filter((p) => p.method === 'BANK' && p.bankName)
+        .map((p) => p.bankName as string)
+      if (newBanks.length > 0) {
+        try {
+          const s = await prisma.storeSettings.findFirst({ where: { organizationId: user.orgId } })
+          const merged = serializeBankOptions([...parseBankOptions(s?.bankOptions), ...newBanks])
+          if (s && merged !== s.bankOptions) {
+            await prisma.storeSettings.update({ where: { id: s.id }, data: { bankOptions: merged } })
+          }
+        } catch {
+          /* non-fatal: the sale is already committed */
+        }
+      }
 
       const preDiscount = built.total + discountTotal
       if (discountTotal > 0 && preDiscount > 0 && discountTotal / preDiscount >= HIGH_DISCOUNT_PCT) {

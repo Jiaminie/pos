@@ -5,6 +5,7 @@ import { generateCOBReportPDF } from '@/lib/pdf'
 import type { COBReportData, COBReportRow, MissedSaleRow, ABCAnalysis } from '@/lib/pdf'
 import type { PDFSettings } from '@/lib/settings'
 import { parseReceiptFormat, parsePosLookupMode } from '@/lib/settings'
+import { DEFAULT_BANK_OPTIONS, parseBankOptions } from '@/lib/payments'
 
 const LOW_STOCK_THRESHOLD = 5
 
@@ -43,6 +44,10 @@ export async function POST() {
       posLookupMode:   parsePosLookupMode(dbSettings?.posLookupMode),
       receiptFormat:   parseReceiptFormat(dbSettings?.receiptFormat),
       receiptTitle:    dbSettings?.receiptTitle   ?? 'RECEIPT',
+      bankOptions:     (() => {
+        const parsed = parseBankOptions(dbSettings?.bankOptions)
+        return parsed.length > 0 ? parsed : DEFAULT_BANK_OPTIONS
+      })(),
     }
     const cur = settings.currency
 

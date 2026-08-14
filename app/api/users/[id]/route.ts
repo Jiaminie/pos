@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/server/db'
 import { requireUser, isAuthUser, canManageUsers } from '@/lib/server/auth/guard'
-import { hashPin, validatePinFormat } from '@/lib/server/auth/pin'
+import { hashPin, validatePinFormat, verifyPin } from '@/lib/server/auth/pin'
 import { logAudit } from '@/lib/server/audit'
 
 export async function PATCH(
@@ -33,9 +33,10 @@ export async function PATCH(
 
   try {
     const body = await request.json()
-    const { name, pin, active, role, branchId } = body as {
+    const { name, pin, currentPin, active, role, branchId } = body as {
       name?: string
       pin?: string
+      currentPin?: string
       active?: boolean
       role?: string
       branchId?: string
@@ -44,6 +45,16 @@ export async function PATCH(
     if (pin) {
       const pinErr = validatePinFormat(pin)
       if (pinErr) return Response.json({ data: null, error: pinErr }, { status: 400 })
+
+      // Changing your own PIN requires proving you know the current one. A
+      // mistyped or unattended change here locks you out of the account with
+      // no way back in — and for the sole OWNER, out of the system entirely.
+      if (id === user.userId && !(currentPin && (await verifyPin(currentPin, target.pinHash)))) {
+        return Response.json(
+          { data: null, error: 'Enter your current PIN to change it' },
+          { status: 403 },
+        )
+      }
     }
 
     if (role === 'MANAGER' && branchId) {
@@ -68,6 +79,37 @@ export async function PATCH(
         ...(user.role === 'OWNER' && branchId !== undefined ? { branchId } : {}),
       },
       include: { branch: { select: { id: true, name: true, code: true } } },
+    })
+
+    await logAudit({
+      organizationId: user.orgId,
+      actorId: user.userId,
+      actorName: user.name,
+      action: 'USER_UPDATE',
+      branchId: updated.branchId ?? target.branchId ?? undefined,
+      targetType: 'User',
+      targetId: id,
+      metadata: {
+        name: target.name,
+        self: id === user.userId,
+        // Record *that* the PIN changed, never the PIN or its hash.
+        pinChanged: Boolean(pin),
+        ...(name !== undefined && name.trim() !== target.name && {
+          nameFrom: target.name,
+          nameTo: name.trim(),
+        }),
+        ...(active !== undefined && active !== target.active && { activeTo: active }),
+        ...(user.role === 'OWNER' && role && role !== target.role && {
+          roleFrom: target.role,
+          roleTo: role,
+        }),
+        ...(user.role === 'OWNER' &&
+          branchId !== undefined &&
+          branchId !== target.branchId && {
+            branchFrom: target.branchId,
+            branchTo: branchId,
+          }),
+      },
     })
 
     const { pinHash: _, ...safe } = updated

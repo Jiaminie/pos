@@ -17,6 +17,7 @@ import { getBrandOptions, getProductBrand, matchesProductSearch } from '@/lib/br
 import { barcodeSearchEnabled } from '@/lib/product-search'
 import { normalizeQuery } from '@/lib/normalize'
 import { fetchSettings, type PosLookupMode } from '@/lib/settings'
+import { methodLabel, type SalePaymentInput } from '@/lib/payments'
 import { canViewReports, fetchMe } from '@/lib/auth'
 import { getMyBranchId } from '@/lib/branch'
 import { INCIDENT_REASON_LABELS } from '@/lib/types'
@@ -147,6 +148,14 @@ export default function ReportsPage() {
     cashierStats: Array<{ cashierId: string; name: string; count: number; discountTotal: number; revenue: number; avgDiscountPct: number }>
     discountedLines: Array<{ saleId: string; createdAt: string; cashierName: string; productName: string; lineDiscount: number }>
   } | null>(null)
+  const [paymentData, setPaymentData] = useState<{
+    byMethod: Array<{ key: string; label: string; method: string; bankName: string | null; count: number; amount: number }>
+    unrecordedAmount: number
+    unrecordedCount: number
+    total: number
+    saleCount: number
+    voidedExcludedCount: number
+  } | null>(null)
   const [posLookupMode, setPosLookupMode] = useState<PosLookupMode>('catalog')
   const [saleRecords, setSaleRecords] = useState<Sale[]>([])
   const [receiptsOpen, setReceiptsOpen] = useState(false)
@@ -197,6 +206,10 @@ export default function ReportsPage() {
         fetch(`/api/reports/discounts?${qs}`, { cache: 'no-store' })
           .then((r) => r.json())
           .then(({ data }) => { if (data) setDiscountData(data) })
+          .catch(() => {})
+        fetch(`/api/reports/payments?${qs}`, { cache: 'no-store' })
+          .then((r) => r.json())
+          .then(({ data }) => { if (data) setPaymentData(data) })
           .catch(() => {})
       }
     })
@@ -465,6 +478,7 @@ export default function ReportsPage() {
         lines: g.lines,
         itemCount: round2(g.lines.reduce((s, l) => s + l.qty, 0)),
         total: rec ? rec.total : lineTotal,
+        payments: rec?.payments,
         voided: voidedSaleIds.has(g.id),
       }
     })
@@ -479,7 +493,7 @@ export default function ReportsPage() {
   const paginatedReceipts = allReceipts.slice((receiptPage - 1) * RECEIPTS_PAGE_SIZE, receiptPage * RECEIPTS_PAGE_SIZE)
 
   async function reprintReceipt(
-    r: { id: string; createdAt: string; total: number; lines: ReceiptLine[] },
+    r: { id: string; createdAt: string; total: number; lines: ReceiptLine[]; payments?: SalePaymentInput[] },
     mode: 'print' | 'save',
   ) {
     try {
@@ -491,6 +505,11 @@ export default function ReportsPage() {
           year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit',
         }),
         items: r.lines.map((l) => ({ name: l.name, sku: l.sku, qty: l.qty, unitPrice: l.unitPrice })),
+        payments: (r.payments ?? []).map((p) => ({
+          label: methodLabel(p.method, p.bankName),
+          amount: p.amount,
+          reference: p.reference,
+        })),
       })
       if (mode === 'print') printPDF(doc)
       else doc.save(`receipt-${r.id.slice(0, 8)}.pdf`)
@@ -873,6 +892,67 @@ export default function ReportsPage() {
         </div>
       )}
 
+      {/* Payment breakdown */}
+      {paymentData && paymentData.saleCount > 0 && (
+        <div className="mb-4 border border-gray-200 rounded-xl overflow-hidden">
+          <div className="w-full flex items-center gap-2 px-4 py-3 text-left bg-white">
+            <ChevronDown size={16} className="text-gray-400 shrink-0" />
+            <span className="text-sm font-semibold text-gray-800 flex-1">Payment breakdown</span>
+            <span className="text-xs text-gray-400 shrink-0">
+              {paymentData.saleCount} sale{paymentData.saleCount === 1 ? '' : 's'}
+              {paymentData.voidedExcludedCount > 0 && (
+                <span className="ml-1">· {paymentData.voidedExcludedCount} voided excluded</span>
+              )}
+            </span>
+          </div>
+          <div className="border-t border-gray-100 bg-white px-4 py-3">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-gray-500 uppercase">
+                  <th className="text-left py-1">Method</th>
+                  <th className="text-right py-1">Sales</th>
+                  <th className="text-right py-1">Amount (KES)</th>
+                  <th className="text-right py-1">Share</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {paymentData.byMethod.map((m) => (
+                  <tr key={m.key}>
+                    <td className="py-1.5 font-medium text-gray-800">{m.label}</td>
+                    <td className="py-1.5 text-right">{m.count}</td>
+                    <td className="py-1.5 text-right tabular-nums">{Math.round(m.amount).toLocaleString()}</td>
+                    <td className="py-1.5 text-right text-gray-500">
+                      {paymentData.total > 0 ? `${((m.amount / paymentData.total) * 100).toFixed(1)}%` : '—'}
+                    </td>
+                  </tr>
+                ))}
+                {paymentData.unrecordedAmount > 0 && (
+                  <tr>
+                    <td className="py-1.5 font-medium text-amber-700">Unrecorded</td>
+                    <td className="py-1.5 text-right text-amber-700">{paymentData.unrecordedCount}</td>
+                    <td className="py-1.5 text-right text-amber-700 tabular-nums">{Math.round(paymentData.unrecordedAmount).toLocaleString()}</td>
+                    <td className="py-1.5 text-right text-amber-700">
+                      {paymentData.total > 0 ? `${((paymentData.unrecordedAmount / paymentData.total) * 100).toFixed(1)}%` : '—'}
+                    </td>
+                  </tr>
+                )}
+                <tr className="border-t border-gray-200">
+                  <td className="py-1.5 font-semibold text-gray-800">Total</td>
+                  <td className="py-1.5 text-right" />
+                  <td className="py-1.5 text-right font-semibold tabular-nums">{Math.round(paymentData.total).toLocaleString()}</td>
+                  <td className="py-1.5" />
+                </tr>
+              </tbody>
+            </table>
+            {paymentData.unrecordedAmount > 0 && (
+              <p className="text-xs text-amber-700/80 mt-2">
+                {paymentData.unrecordedCount} sale{paymentData.unrecordedCount === 1 ? '' : 's'} have no payment records — they were rung before payment methods were captured.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Receipts — look up & reprint a past sale */}
       {(allReceipts.length > 0 || receiptSearch) && (
         <div className="mb-4 border border-gray-200 rounded-xl overflow-hidden">
@@ -925,6 +1005,15 @@ export default function ReportsPage() {
                           )}
                         </div>
                         <p className="text-xs text-gray-400 font-mono truncate">#{r.id.slice(0, 8)} · {r.itemCount} item{r.itemCount === 1 ? '' : 's'}</p>
+                        {(r.payments?.length ?? 0) > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {(r.payments ?? []).map((p) => (
+                              <span key={p.id} className="text-[10px] font-medium text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded">
+                                {methodLabel(p.method, p.bankName)} {p.amount.toLocaleString()}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <p className="text-sm font-semibold text-gray-700 shrink-0 tabular-nums">KSh {r.total.toLocaleString()}</p>
                       <div className="flex items-center gap-1 shrink-0">

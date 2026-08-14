@@ -319,6 +319,12 @@ interface ThermalLine {
   stockUnit?: string
 }
 
+export interface ReceiptPayment {
+  label: string
+  amount: number
+  reference?: string | null
+}
+
 interface ThermalDoc {
   title: string        // 'RECEIPT' | 'QUOTATION'
   refLabel: string     // 'Order' | 'Ref'
@@ -329,6 +335,7 @@ interface ThermalDoc {
   items: ThermalLine[]
   total: number
   note?: string
+  payments?: ReceiptPayment[]
 }
 
 /**
@@ -438,6 +445,31 @@ function drawThermal(doc: jsPDF, data: ThermalDoc, settings: PDFSettings, width:
   doc.text(`Items: ${units}`, m, y)
   y += 4.5
 
+  // ── Payments (how the sale was paid)
+  if (data.payments && data.payments.length > 0) {
+    rule()
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(7.5)
+    doc.setTextColor(...DARK)
+    doc.text('Paid by:', m, y)
+    y += 3.6
+    data.payments.forEach((p) => {
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(7.5)
+      doc.setTextColor(...DARK)
+      doc.text(p.label, m, y)
+      doc.text(`${cur} ${p.amount.toLocaleString()}`, right, y, { align: 'right' })
+      y += 3.4
+      if (p.reference) {
+        doc.setFontSize(6.5)
+        doc.setTextColor(...GRAY_TXT)
+        doc.text(p.reference, m, y)
+        y += 3
+      }
+    })
+    y += 1
+  }
+
   // ── Note / terms
   if (data.note) {
     rule()
@@ -490,6 +522,7 @@ export interface ReceiptData {
   items: ReceiptItem[]
   total: number
   date: string
+  payments?: ReceiptPayment[]
 }
 
 export function generateReceiptPDF(data: ReceiptData): jsPDF {
@@ -509,6 +542,7 @@ export function generateReceiptPDF(data: ReceiptData): jsPDF {
       date: data.date,
       items: data.items,
       total: data.total,
+      payments: data.payments,
     }, settings, rollWidth)
   }
 
@@ -559,7 +593,30 @@ export function generateReceiptPDF(data: ReceiptData): jsPDF {
   })
 
   const tableEnd = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY
-  drawPaymentDetailsA4(doc, settings, tableEnd + 10, primary)
+
+  // ── Payments (how the sale was paid)
+  if (data.payments && data.payments.length > 0) {
+    y = drawSectionHeader(doc, 'Payment', tableEnd + 10, primary)
+    data.payments.forEach((p) => {
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(9)
+      doc.setTextColor(...DARK)
+      doc.text(p.label, MARGIN + 5, y)
+      doc.text(`${cur} ${p.amount.toLocaleString()}`, PAGE_W - MARGIN - 5, y, { align: 'right' })
+      y += 5
+      if (p.reference) {
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(8)
+        doc.setTextColor(...GRAY_TXT)
+        doc.text(p.reference, MARGIN + 5, y)
+        y += 3
+      }
+    })
+    y += 4
+    drawPaymentDetailsA4(doc, settings, y, primary)
+  } else {
+    drawPaymentDetailsA4(doc, settings, tableEnd + 10, primary)
+  }
 
   addFooters(doc, settings)
   return doc

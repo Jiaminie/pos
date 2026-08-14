@@ -63,6 +63,12 @@ export async function POST(request: NextRequest) {
 
     if (!matched) {
       const remaining = recordFailedAttempt(branchId, caller)
+      if (remaining === 0) {
+        return Response.json(
+          { data: null, error: 'Too many failed attempts. Try again in 15 minutes.' },
+          { status: 429 },
+        )
+      }
       return Response.json(
         { data: null, error: `Invalid PIN. ${remaining} attempt(s) remaining.` },
         { status: 401 },

@@ -87,6 +87,12 @@ model User {
   @@map("users")
 }
 
+enum PaymentMethod {
+  CASH
+  MPESA
+  BANK
+}
+
 model Sale {
   id                 String    @id
   organizationId     String    @map("organization_id")
@@ -106,11 +112,27 @@ model Sale {
   branch  Branch                 @relation(fields: [branchId], references: [id])
   cashier User                   @relation(fields: [cashierId], references: [id])
   lines   InventoryTransaction[]
+  payments SalePayment[]
 
   @@index([branchId])
   @@index([cashierId])
   @@index([createdAt])
   @@map("sales")
+}
+
+model SalePayment {
+  id        String        @id                       // client-generated (offline-first)
+  saleId    String        @map("sale_id")
+  method    PaymentMethod
+  bankName  String?       @map("bank_name")         // set only when method = BANK
+  amount    Decimal
+  reference String?                                 // M-Pesa code / bank slip no.
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  sale Sale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  @@index([saleId])
+  @@map("sale_payments")
 }
 
 model AuditEvent {
@@ -318,6 +340,7 @@ model StoreSettings {
   receiptFormat    String   @default("a4") @map("receipt_format")
   receiptTitle     String   @default("RECEIPT") @map("receipt_title")
   paymentDetails   String   @default("") @map("payment_details")
+  bankOptions      String   @default("Cooperative Bank,Equity Bank") @map("bank_options")
   resendApiKey     String   @default("") @map("resend_api_key")
   reportEmail      String   @default("") @map("report_email")
   fromEmail        String   @default("") @map("from_email")
