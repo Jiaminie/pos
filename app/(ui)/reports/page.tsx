@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ArrowDownToLine, BarChart3, CalendarRange, ChevronDown, ChevronLeft, ChevronRight, Download, FileText, Package, Percent, Printer, Receipt, Search, TrendingUp, X } from 'lucide-react'
+import { ArrowDownToLine, BarChart3, CalendarRange, ChevronDown, ChevronLeft, ChevronRight, Download, FileText, Package, Percent, Printer, Receipt, Search, TrendingUp, TriangleAlert, X } from 'lucide-react'
 import { BrandPicker } from '@/components/pos/BrandPicker'
 import { CategoryPicker } from '@/components/pos/CategoryPicker'
 import { toast } from 'sonner'
@@ -21,7 +21,9 @@ import { methodLabel, type SalePaymentInput } from '@/lib/payments'
 import { canViewReports, fetchMe } from '@/lib/auth'
 import { getMyBranchId } from '@/lib/branch'
 import { INCIDENT_REASON_LABELS } from '@/lib/types'
-import type { InventoryTransaction, Product, ProductCategory, Incident } from '@/lib/types'
+import type { InventoryTransaction, Product, ProductCategory, Incident, Branch } from '@/lib/types'
+import type { AuthUser } from '@/lib/auth'
+import { getAll as getLocalBranches } from '@/lib/db/branches'
 
 type Range = 'today' | 'week' | 'month' | 'all' | 'custom'
 type ActivityFilter = 'all' | 'sold' | 'stocked'
@@ -161,10 +163,46 @@ export default function ReportsPage() {
   const [receiptsOpen, setReceiptsOpen] = useState(false)
   const [receiptSearch, setReceiptSearch] = useState('')
   const [receiptPage, setReceiptPage] = useState(1)
-  const myBranchId = getMyBranchId()
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null)
+  const [knownBranches, setKnownBranches] = useState<Branch[]>([])
+  const deviceBranchId = getMyBranchId()
+
+  // One branch for the whole page.
+  //
+  // The client-computed sections read the local replica (populated for the
+  // DEVICE's branch), while the payments/discounts APIs are pinned server-side
+  // to the USER's branch by branchFilter(). Keying the two halves off different
+  // ids let one screen show two branches at once. The server's choice wins,
+  // since it is the one that is actually enforced.
+  const reportBranchId = authUser && authUser.role !== 'OWNER'
+    ? (authUser.branchId ?? deviceBranchId)
+    : deviceBranchId
+
+  // For a non-owner these must agree: assertBranchAccess() rejects sales, sync,
+  // transactions and transfers whenever they do not, so a mismatch is a broken
+  // device assignment rather than a display quirk.
+  const branchMismatch = Boolean(
+    authUser && authUser.role !== 'OWNER' && authUser.branchId && deviceBranchId &&
+    authUser.branchId !== deviceBranchId,
+  )
+
+  const myBranchId = reportBranchId
   const PAGE_SIZE = 25
   const RECEIPTS_PAGE_SIZE = 15
   const LOW_STOCK_PREVIEW = 10
+
+  // Name the branch the figures cover — an unlabelled report is impossible to
+  // tell apart from another branch's. Loaded once, then resolved during render
+  // so the label always matches the branch actually in use.
+  useEffect(() => {
+    getLocalBranches().then(setKnownBranches).catch(() => {})
+  }, [])
+
+  const branchName = (() => {
+    if (!reportBranchId) return null
+    const b = knownBranches.find((x) => x.id === reportBranchId)
+    return b ? `${b.name} (${b.code})` : null
+  })()
 
   async function refreshLocal() {
     const [txs, prods, cats, incs, sls] = await Promise.all([getTransactions(), getProducts(), getCategories(), getIncidents(), getSales()])
@@ -196,13 +234,18 @@ export default function ReportsPage() {
     load()
     fetchSettings().then((s) => setPosLookupMode(s.posLookupMode)).catch(() => {})
     fetchMe().then((u) => {
+      setAuthUser(u)
       if (u && canViewReports(u)) {
         const fromIso = customFrom
         const toIso = customTo
         const qs = new URLSearchParams()
         if (fromIso) qs.set('from', fromIso)
         if (toIso) qs.set('to', toIso)
-        if (myBranchId && u.role === 'MANAGER') qs.set('branchId', myBranchId)
+        // Send the branch the page is reporting on. branchFilter() ignores this
+        // for non-owners and pins to their own branch anyway; sending it keeps
+        // the owner's server figures matching the ones computed locally.
+        const scoped = u.role !== 'OWNER' ? (u.branchId ?? deviceBranchId) : deviceBranchId
+        if (scoped) qs.set('branchId', scoped)
         fetch(`/api/reports/discounts?${qs}`, { cache: 'no-store' })
           .then((r) => r.json())
           .then(({ data }) => { if (data) setDiscountData(data) })
@@ -621,8 +664,30 @@ export default function ReportsPage() {
     <div className="flex-1 overflow-y-auto p-6">
     <div className="max-w-5xl mx-auto">
       <div className="mb-6 space-y-3">
+        {branchMismatch && (
+          <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+            <TriangleAlert size={16} className="mt-0.5 shrink-0 text-red-600" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-red-900">This device is assigned to the wrong branch</p>
+              <p className="mt-0.5 text-xs text-red-800">
+                You belong to one branch but this device is set to another. Selling and syncing are blocked
+                while they disagree, so these figures will be stale. Fix it in Settings → Device, or ask the
+                Owner to.
+              </p>
+            </div>
+          </div>
+        )}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h1 className="text-2xl font-semibold tracking-tight">Reports</h1>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-semibold tracking-tight">Reports</h1>
+            <p className="mt-0.5 text-xs text-gray-500">
+              {branchName
+                ? `Figures cover ${branchName}`
+                : reportBranchId
+                  ? 'Figures cover this branch'
+                  : 'Figures cover all branches'}
+            </p>
+          </div>
           <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={exportCsv}
