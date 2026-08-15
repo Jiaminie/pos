@@ -5,6 +5,8 @@ import type { Product } from '@/lib/types'
 
 export type NewProductInput = {
   name: string
+  /** Shop-floor name. Usually the raw text off the count sheet. */
+  alias?: string
   sellingPrice: number
   /** Omit entirely when the user lacks cost-price permission — the server then
    *  skips its cost permission check and defaults the stored cost to 0. */
@@ -27,6 +29,7 @@ export async function createStockCountProduct(
   existingSkus: Iterable<string>,
 ): Promise<Product> {
   const name = input.name.trim()
+  const alias = input.alias?.trim() || undefined
   const specification = input.specification?.trim() || undefined
   const baseSku = skuFromName(cleanProductName(name), specification) || 'item'
   const sku = uniqueSku(baseSku, existingSkus)
@@ -35,6 +38,7 @@ export async function createStockCountProduct(
   const product: Product = {
     id: crypto.randomUUID(),
     name,
+    alias,
     sku,
     specification,
     sellingPrice: input.sellingPrice,
@@ -51,6 +55,7 @@ export async function createStockCountProduct(
     body: JSON.stringify({
       id: product.id,
       name: product.name,
+      alias: product.alias ?? null,
       sku: product.sku,
       specification: product.specification ?? null,
       sellingPrice: product.sellingPrice,

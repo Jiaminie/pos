@@ -41,6 +41,7 @@ export async function GET(request: NextRequest) {
         ? {
             OR: [
               { name: { contains: search, mode: "insensitive" as const } },
+              { alias: { contains: search, mode: "insensitive" as const } },
               { sku: { contains: search, mode: "insensitive" as const } },
               { brand: { contains: search, mode: "insensitive" as const } },
               { barcode: { contains: search, mode: "insensitive" as const } },
@@ -94,7 +95,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { id, name, sku, barcode, sellingPrice, costPrice, lowestPrice, imageUrl, category, brand, specification, stockUnit, unitId } = body;
+    const { id, name, alias, sku, barcode, sellingPrice, costPrice, lowestPrice, imageUrl, category, brand, specification, stockUnit, unitId } = body;
 
     if (sellingPrice !== undefined && sellingPrice !== null) {
       const ok = await hasPermission(user, 'catalog.price.selling');
@@ -119,6 +120,8 @@ export async function POST(request: NextRequest) {
       try {
         const data = {
           name,
+          // Blank collapses to NULL so the matcher/search never score against "".
+          alias: alias?.trim() || null,
           sku: attemptSku,
           barcode: barcode?.trim() || null,
           brand: brand.trim().toUpperCase(),
@@ -141,6 +144,7 @@ export async function POST(request: NextRequest) {
               create: { id, ...data },
               update: {
                 ...(name !== undefined && { name }),
+                ...(alias !== undefined && { alias: alias?.trim() || null }),
                 ...(sku !== undefined && { sku: attemptSku }),
                 ...(barcode !== undefined && { barcode: barcode?.trim() || null }),
                 ...(brand !== undefined && { brand: brand.trim().toUpperCase() }),

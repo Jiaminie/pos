@@ -32,6 +32,7 @@ export function matchesProductSearch(
 
   return (
     normalizeQuery(product.name).includes(nq) ||
+    normalizeQuery(product.alias ?? '').includes(nq) ||
     normalizeQuery(product.sku).includes(nq) ||
     normalizeQuery(product.specification ?? '').includes(nq) ||
     normalizeQuery(getProductBrand(product)).includes(nq) ||

@@ -205,6 +205,11 @@ model Unit {
 model Product {
   id             String  @id @default(uuid())
   name           String
+  // Shop-floor name for this product ("elbow 25"), as written on handwritten
+  // count sheets. Distinct from `specification`, which is the size/variant.
+  // Fed into the stock-count photo matcher (lib/stock-count/match.ts) and
+  // catalog search, so the counted item is recognised under the name staff use.
+  alias          String?
   specification  String?
   stockUnit      String? @map("stock_unit")
   unitId         String? @map("unit_id")

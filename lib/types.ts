@@ -50,6 +50,8 @@ export type Product = {
   name: string
   sku: string
   barcode?: string
+  /** Shop-floor name staff use on count sheets. Feeds search and photo matching. */
+  alias?: string
   specification?: string
   /** @deprecated Use unitId instead. Kept for backward compat during migration. */
   stockUnit?: string

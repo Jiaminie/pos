@@ -49,13 +49,26 @@ function tokenize(text: string): string[] {
     .filter((t) => t.length >= 2 && !/^\d+$/.test(t) && !STOPWORDS.has(t))
 }
 
-function productTokens(product: Product): string[] {
-  const brand = getProductBrand(product)
-  return [
-    ...tokenize(product.name),
-    ...tokenize(product.specification ?? ''),
-    ...tokenize(brand),
-  ]
+/**
+ * The token sets a product may be recognised under: its formal catalog name,
+ * and — when set — its shop-floor alias.
+ *
+ * These are kept as SEPARATE candidates rather than concatenated on purpose.
+ * The score is Dice (2·shared / (|q| + |c|)), so appending alias tokens to the
+ * formal set would inflate |c| and *lower* the score of every aliased product
+ * whose alias happens not to match — an alias would then hurt the products it
+ * was added to help. Scoring each set independently and keeping the best means
+ * an alias can only ever raise a product's score.
+ */
+function productTokenSets(product: Product): string[][] {
+  const brand = tokenize(getProductBrand(product))
+  const spec = tokenize(product.specification ?? '')
+  const sets = [[...tokenize(product.name), ...spec, ...brand]]
+
+  const alias = tokenize(product.alias ?? '')
+  if (alias.length > 0) sets.push([...alias, ...spec, ...brand])
+
+  return sets
 }
 
 type Overlap = { score: number; exactShared: number }
@@ -93,7 +106,16 @@ export function matchProduct(description: string, products: Product[]): ProductM
   let secondBest = 0
 
   for (const product of products) {
-    const { score, exactShared } = overlap(qTokens, productTokens(product))
+    // Best of the product's name-based and alias-based token sets.
+    let score = 0
+    let exactShared = 0
+    for (const cTokens of productTokenSets(product)) {
+      const o = overlap(qTokens, cTokens)
+      if (o.score > score) {
+        score = o.score
+        exactShared = o.exactShared
+      }
+    }
     if (score <= 0) continue
 
     if (!best || score > best.score) {

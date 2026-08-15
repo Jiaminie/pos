@@ -14,7 +14,7 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { name, sku, barcode, sellingPrice, costPrice, lowestPrice, category, brand, specification, stockUnit, imageUrl, unitId } = body;
+    const { name, alias, sku, barcode, sellingPrice, costPrice, lowestPrice, category, brand, specification, stockUnit, imageUrl, unitId } = body;
 
     if (sellingPrice !== undefined) {
       const ok = await hasPermission(user, 'catalog.price.selling');
@@ -37,6 +37,8 @@ export async function PATCH(
       where: { id },
       data: {
         ...(name !== undefined && { name }),
+        // Clearing the field sends "" — store NULL so it reads as "no alias".
+        ...(alias !== undefined && { alias: alias?.trim() || null }),
         ...(sku !== undefined && { sku }),
         ...(barcode !== undefined && { barcode: barcode?.trim() || null }),
         ...(sellingPrice !== undefined && { sellingPrice }),

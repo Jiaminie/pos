@@ -91,6 +91,8 @@ const PAGE_SIZE = 30
 
 type NewItemForm = {
   name: string
+  /** Shop-floor name — on photo rows this is prefilled with the raw sheet text. */
+  alias: string
   sellingPrice: string
   costPrice: string
   categoryId: string
@@ -100,6 +102,7 @@ type NewItemForm = {
 
 const emptyNewItemForm: NewItemForm = {
   name: '',
+  alias: '',
   sellingPrice: '',
   costPrice: '',
   categoryId: '',
@@ -181,6 +184,13 @@ export default function StockCountPage() {
   const [manualRows, setManualRows] = useState<{ key: string; row: ExtractedStockCountRow }[]>([])
   const [manualAddOpen, setManualAddOpen] = useState(false)
   const [manualAddForm, setManualAddForm] = useState<EditRowForm>(emptyEditForm)
+  // Inline "add product" strip on the count sheet. Kept separate from the
+  // photo-review newItemForm so an open review form isn't clobbered by it.
+  const [sheetAddOpen, setSheetAddOpen] = useState(false)
+  const [sheetForm, setSheetForm] = useState<NewItemForm>(emptyNewItemForm)
+  const [sheetQty, setSheetQty] = useState('')
+  const [creatingSheetItem, setCreatingSheetItem] = useState(false)
+  const [offline, setOffline] = useState(false)
   const [lastReport, setLastReport] = useState<StockCountReport | null>(null)
   const [reportOpen, setReportOpen] = useState(false)
   const [exportingReport, setExportingReport] = useState(false)
@@ -189,6 +199,7 @@ export default function StockCountPage() {
   const photoAppliedRef = useRef<Set<string>>(new Set())
   const submittingRef = useRef(false)
   const creatingItemRef = useRef(false)
+  const creatingSheetRef = useRef(false)
   const manualRowSeq = useRef(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Guards the persistence effect below from writing an empty {} over storage
@@ -301,6 +312,20 @@ export default function StockCountPage() {
     fetchSettings()
       .then((s) => setPosLookupMode(s.posLookupMode))
       .catch(() => {})
+  }, [])
+
+  // Only the inline add-product strip needs this — creating a product must hit
+  // the server first (FK ordering), while counting existing products does not.
+  useEffect(() => {
+    const goOnline = () => setOffline(false)
+    const goOffline = () => setOffline(true)
+    queueMicrotask(() => setOffline(!navigator.onLine))
+    window.addEventListener('online', goOnline)
+    window.addEventListener('offline', goOffline)
+    return () => {
+      window.removeEventListener('online', goOnline)
+      window.removeEventListener('offline', goOffline)
+    }
   }, [])
 
   useEffect(() => {
@@ -744,12 +769,100 @@ export default function StockCountPage() {
     toast.success('Row added — resolve it like any extracted row')
   }
 
+  /**
+   * Creates a product straight from the count sheet and counts it in one step.
+   *
+   * Unlike everything else on this page, this REQUIRES a connection:
+   * createStockCountProduct awaits the server POST before storing locally,
+   * because inventory_transactions.product_id is an FK — a product that exists
+   * only in IndexedDB would make the whole adjustment batch fail to sync.
+   */
+  async function handleCreateSheetItem() {
+    if (creatingSheetRef.current) return
+    const name = sheetForm.name.trim()
+    if (!name) {
+      toast.error('Product name is required')
+      return
+    }
+    if (offline) {
+      toast.error('Adding a product needs a connection — counts of existing products still work offline')
+      return
+    }
+
+    // Same leniency as the photo-review form: an unknown price must not block
+    // the count. It can be filled in later from the Products page.
+    let sellingPrice = 0
+    if (sheetForm.sellingPrice.trim()) {
+      sellingPrice = parseFloat(sheetForm.sellingPrice)
+      if (Number.isNaN(sellingPrice) || sellingPrice < 0) {
+        toast.error('Selling price is not a valid number')
+        return
+      }
+    }
+    let costPrice: number | undefined
+    if (canSetCostPrice && sheetForm.costPrice.trim()) {
+      costPrice = parseFloat(sheetForm.costPrice)
+      if (Number.isNaN(costPrice) || costPrice < 0) {
+        toast.error('Buying price is not a valid number')
+        return
+      }
+    }
+
+    creatingSheetRef.current = true
+    setCreatingSheetItem(true)
+    try {
+      const product = await createStockCountProduct(
+        {
+          name,
+          alias: sheetForm.alias,
+          sellingPrice,
+          costPrice,
+          categoryId: sheetForm.categoryId || undefined,
+          categoryName: categories.find((c) => c.id === sheetForm.categoryId)?.name ?? null,
+          brand: sheetForm.brand,
+          specification: sheetForm.specification,
+        },
+        products.map((p) => p.sku),
+      )
+      setProducts((prev) => [product, ...prev])
+
+      // A new product's system stock is 0, so the typed qty becomes its count
+      // and flows through the normal submit as an ADJUSTMENT.
+      const qty = sheetQty.trim()
+      if (qty) setCountedQtys((prev) => ({ ...prev, [product.id]: qty }))
+
+      setSheetForm(emptyNewItemForm)
+      setSheetQty('')
+      toast.success(
+        qty ? `Added “${product.name}” and counted ${qty}` : `Added “${product.name}”`,
+      )
+
+      // `visible` is sorted by name and paginated 30 at a time, so a new
+      // product usually lands on some other page — or is excluded outright by
+      // the active filters — and would appear not to have been added. Narrow
+      // the sheet to it instead: deterministic, unlike guessing its page.
+      setFilterCategoryId('all')
+      setFilterBrand('all')
+      setShowCountedOnly(false)
+      handleSearch(product.name)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not create product')
+    } finally {
+      creatingSheetRef.current = false
+      setCreatingSheetItem(false)
+    }
+  }
+
   function openNewItem(item: UnmatchedReviewRow) {
     setOpenPickerKey(null)
     setEditKey(null)
     setNewItemForm({
       ...emptyNewItemForm,
       name: item.row.description,
+      // Keep the raw sheet wording as the alias. If the user rewrites `name`
+      // into the formal catalog name, the matcher still recognises the phrase
+      // that was actually written on the form next time it appears.
+      alias: item.row.description,
       specification: item.row.sizeType ?? '',
       brand: item.row.company ?? '',
     })
@@ -800,6 +913,7 @@ export default function StockCountPage() {
           name,
           sellingPrice,
           costPrice,
+          alias: newItemForm.alias,
           categoryId: newItemForm.categoryId || undefined,
           categoryName: categories.find((c) => c.id === newItemForm.categoryId)?.name ?? null,
           brand: newItemForm.brand,
@@ -1018,6 +1132,188 @@ export default function StockCountPage() {
     )
   }
 
+  /**
+   * "Add a product" strip on the count sheet, for items found on the floor that
+   * aren't in the catalog at all.
+   *
+   * Deliberately NOT the first row of the table body: `visible` is sorted by
+   * name and paginated, so a row inside the tbody would scroll out of reach on
+   * page 2 and would be filtered away by the search box the moment it is used.
+   */
+  function renderSheetAdd() {
+    const set = (patch: Partial<NewItemForm>) => setSheetForm((f) => ({ ...f, ...patch }))
+
+    if (!sheetAddOpen) {
+      return (
+        <button
+          type="button"
+          onClick={() => {
+            setSheetAddOpen(true)
+            // Seed the name from whatever was just searched for — reaching for
+            // this button almost always follows a search that found nothing.
+            if (search.trim() && !sheetForm.name.trim()) {
+              setSheetForm((f) => ({ ...f, name: search.trim(), alias: search.trim() }))
+            }
+          }}
+          className="w-full mb-3 flex items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 px-4 py-3 text-sm text-gray-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/40 transition-colors"
+        >
+          <Plus size={16} />
+          Product not in the catalog? Add it here
+        </button>
+      )
+    }
+
+    return (
+      <div className="mb-3 rounded-xl border border-blue-200 bg-blue-50/40 p-3">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-medium text-gray-700">New product</p>
+          <button
+            type="button"
+            onClick={() => {
+              setSheetAddOpen(false)
+              setSheetForm(emptyNewItemForm)
+              setSheetQty('')
+            }}
+            className="text-gray-400 hover:text-gray-600"
+            aria-label="Close add product"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {offline && (
+          <p className="mb-2 flex items-start gap-1.5 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-2 text-xs text-amber-800">
+            <AlertTriangle size={14} className="shrink-0 mt-px" />
+            <span>
+              You&apos;re offline. Adding a product needs a connection — counting products that
+              already exist keeps working.
+            </span>
+          </p>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <label className="text-xs text-gray-500 sm:col-span-2">
+            Name
+            <input
+              type="text"
+              value={sheetForm.name}
+              onChange={(e) => set({ name: e.target.value })}
+              placeholder="e.g. Plain Elbow 25mm"
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+          <label className="text-xs text-gray-500 sm:col-span-2">
+            Alias <span className="text-gray-400">(what staff write on the count sheet)</span>
+            <input
+              type="text"
+              value={sheetForm.alias}
+              onChange={(e) => set({ alias: e.target.value })}
+              placeholder="e.g. elbow 25"
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+          <label className="text-xs text-gray-500">
+            Spec / size <span className="text-gray-400">(optional)</span>
+            <input
+              type="text"
+              value={sheetForm.specification}
+              onChange={(e) => set({ specification: e.target.value })}
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+          <label className="text-xs text-gray-500">
+            Brand <span className="text-gray-400">(optional)</span>
+            <input
+              type="text"
+              value={sheetForm.brand}
+              onChange={(e) => set({ brand: e.target.value })}
+              placeholder="UNBRANDED"
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+          <label className="text-xs text-gray-500">
+            Category <span className="text-gray-400">(optional)</span>
+            <select
+              value={sheetForm.categoryId}
+              onChange={(e) => set({ categoryId: e.target.value })}
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Uncategorized (set later)</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {canSetSellingPrice && (
+            <label className="text-xs text-gray-500">
+              Selling price <span className="text-gray-400">(optional, set later)</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="any"
+                min="0"
+                value={sheetForm.sellingPrice}
+                onChange={(e) => set({ sellingPrice: e.target.value })}
+                placeholder="0.00"
+                className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm tabular-nums bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </label>
+          )}
+          {canSetCostPrice && (
+            <label className="text-xs text-gray-500">
+              Buying price <span className="text-gray-400">(optional)</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="any"
+                min="0"
+                value={sheetForm.costPrice}
+                onChange={(e) => set({ costPrice: e.target.value })}
+                placeholder="0.00"
+                className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm tabular-nums bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </label>
+          )}
+          <label className="text-xs text-gray-500">
+            Counted qty <span className="text-gray-400">(optional)</span>
+            <input
+              type="number"
+              inputMode="decimal"
+              step="any"
+              min="0"
+              value={sheetQty}
+              onChange={(e) => setSheetQty(e.target.value)}
+              placeholder="—"
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm tabular-nums bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+        </div>
+
+        <div className="flex items-center gap-2 mt-3">
+          <button
+            type="button"
+            disabled={creatingSheetItem || offline || !sheetForm.name.trim()}
+            onClick={() => void handleCreateSheetItem()}
+            className="inline-flex items-center gap-1 rounded-lg bg-blue-600 text-white px-3 py-1.5 text-xs font-medium hover:bg-blue-700 disabled:opacity-50"
+          >
+            {creatingSheetItem ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <PackagePlus size={14} />
+            )}
+            {sheetQty.trim() ? 'Create & count' : 'Create'}
+          </button>
+          <p className="text-[11px] text-gray-500">
+            A new product starts at 0 system stock, so the counted qty becomes its opening
+            adjustment on submit.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   function renderNewItemForm(item: UnmatchedReviewRow) {
     const set = (patch: Partial<NewItemForm>) => setNewItemForm((f) => ({ ...f, ...patch }))
     return (
@@ -1032,6 +1328,16 @@ export default function StockCountPage() {
               type="text"
               value={newItemForm.name}
               onChange={(e) => set({ name: e.target.value })}
+              className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+          <label className="text-xs text-gray-500 sm:col-span-2">
+            Alias <span className="text-gray-400">(what staff write on the count sheet)</span>
+            <input
+              type="text"
+              value={newItemForm.alias}
+              onChange={(e) => set({ alias: e.target.value })}
+              placeholder="e.g. elbow 25"
               className="mt-0.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </label>
@@ -2078,6 +2384,8 @@ export default function StockCountPage() {
           </p>
         </div>
 
+        {canManageProducts && renderSheetAdd()}
+
         {visible.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-gray-500">
             <Camera size={32} className="mb-3 opacity-40" />
@@ -2113,6 +2421,7 @@ export default function StockCountPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
                     <tr>
+                      <th className="text-left px-3 py-3 w-16 sr-only">Image</th>
                       <th className="text-left px-4 py-3">Product</th>
                       <th className="text-left px-4 py-3">Spec</th>
                       <th className="text-left px-4 py-3">Brand</th>
@@ -2126,9 +2435,30 @@ export default function StockCountPage() {
                       const system = stockByProductId[product.id] ?? product.initialStock ?? 0
                       const delta = getRowDelta(product.id, product.initialStock ?? 0)
                       return (
-                        <tr key={product.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-2.5 font-medium truncate max-w-[200px]" title={product.name}>
-                            {product.name}
+                        <tr key={product.id} className="hover:bg-gray-50" data-count-row={product.id}>
+                          <td className="px-3 py-2">
+                            {product.imageUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={product.imageUrl}
+                                alt=""
+                                loading="lazy"
+                                decoding="async"
+                                className="w-12 h-12 rounded-lg object-cover ring-1 ring-gray-200"
+                              />
+                            ) : (
+                              <div className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center ring-1 ring-gray-200">
+                                <Camera size={14} className="text-gray-400" />
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5 max-w-[220px]" title={product.name}>
+                            <p className="font-medium truncate">{product.name}</p>
+                            {product.alias && (
+                              <p className="text-xs text-blue-600 truncate" title={product.alias}>
+                                {product.alias}
+                              </p>
+                            )}
                           </td>
                           <td className="px-4 py-2.5 text-xs text-gray-500 truncate max-w-[120px]">
                             {product.specification ?? '—'}
@@ -2176,13 +2506,33 @@ export default function StockCountPage() {
                   const system = stockByProductId[product.id] ?? product.initialStock ?? 0
                   const delta = getRowDelta(product.id, product.initialStock ?? 0)
                   return (
-                    <div key={product.id} className="p-4 space-y-2">
-                      <div>
-                        <p className="font-medium text-sm">{product.name}</p>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          {[product.specification, getProductBrand(product)].filter(Boolean).join(' · ') ||
-                            '—'}
-                        </p>
+                    <div key={product.id} className="p-4 space-y-2" data-count-row={product.id}>
+                      <div className="flex items-start gap-3">
+                        {product.imageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={product.imageUrl}
+                            alt=""
+                            loading="lazy"
+                            decoding="async"
+                            className="w-12 h-12 shrink-0 rounded-lg object-cover ring-1 ring-gray-200"
+                          />
+                        ) : (
+                          <div className="w-12 h-12 shrink-0 rounded-lg bg-gray-100 flex items-center justify-center ring-1 ring-gray-200">
+                            <Camera size={14} className="text-gray-400" />
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <p className="font-medium text-sm">{product.name}</p>
+                          {product.alias && (
+                            <p className="text-xs text-blue-600 truncate">{product.alias}</p>
+                          )}
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {[product.specification, getProductBrand(product)]
+                              .filter(Boolean)
+                              .join(' · ') || '—'}
+                          </p>
+                        </div>
                       </div>
                       <div className="flex items-center justify-between gap-3 text-sm">
                         <span className="text-gray-500">

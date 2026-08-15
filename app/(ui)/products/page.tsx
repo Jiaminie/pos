@@ -33,7 +33,7 @@ import { getMyBranchId } from '@/lib/branch'
 import type { Product, ProductCategory, InventoryTransaction, Unit, TransactionSource } from '@/lib/types'
 
 const emptyForm = {
-  name: '', sku: '', barcode: '', specification: '',
+  name: '', alias: '', sku: '', barcode: '', specification: '',
   unitId: '', newUnitCode: '', newUnitName: '',
   sellingPrice: '', costPrice: '', lowestPrice: '',
   openingStock: '', addStock: '', restockSource: 'SUPPLIER' as TransactionSource,
@@ -385,6 +385,7 @@ function ProductsPageContent() {
     setDupWarning([])
     setForm({
       name: p.name,
+      alias: p.alias ?? '',
       sku: p.sku,
       specification: p.specification ?? '',
       // unitId is read-only on edit — shown but not editable
@@ -408,6 +409,7 @@ function ProductsPageContent() {
 
   function buildProductSyncBody(input: {
     name: string
+    alias?: string
     sku: string
     specification?: string
     sellingPrice: number
@@ -420,6 +422,7 @@ function ProductsPageContent() {
   }): Record<string, unknown> {
     const body: Record<string, unknown> = {
       name: input.name,
+      alias: input.alias ?? null,
       sku: input.sku,
       specification: input.specification ?? null,
       category: input.categoryName,
@@ -500,6 +503,7 @@ function ProductsPageContent() {
         const updated: Product = {
           ...editingProduct,
           name: form.name,
+          alias: form.alias.trim() || undefined,
           sku: form.sku,
           ...(showBarcodeField ? { barcode: barcodeValue } : {}),
           specification: form.specification || undefined,
@@ -519,6 +523,7 @@ function ProductsPageContent() {
           'PATCH',
           buildProductSyncBody({
             name: updated.name,
+            alias: updated.alias,
             sku: updated.sku,
             specification: updated.specification,
             sellingPrice: updated.sellingPrice,
@@ -561,6 +566,7 @@ function ProductsPageContent() {
         const product: Product = {
           id: crypto.randomUUID(),
           name: form.name,
+          alias: form.alias.trim() || undefined,
           sku,
           ...(barcodeValue ? { barcode: barcodeValue } : {}),
           specification: form.specification || undefined,
@@ -598,6 +604,7 @@ function ProductsPageContent() {
         toast.success('Product saved')
         const createBody = buildProductSyncBody({
           name: product.name,
+          alias: product.alias,
           sku: product.sku,
           specification: product.specification,
           sellingPrice: product.sellingPrice,
@@ -818,6 +825,18 @@ function ProductsPageContent() {
                       Similar product already exists: {dupWarning.join(', ')}
                     </p>
                   )}
+                </div>
+
+                <div className="space-y-1.5 order-1 sm:order-2">
+                  <Label.Root htmlFor="p-alias" className="text-sm font-medium text-gray-700">
+                    Alias <span className="font-normal text-gray-400">(optional)</span>
+                  </Label.Root>
+                  <input id="p-alias" value={form.alias} onChange={field('alias')}
+                    placeholder="What staff call it on count sheets, e.g. elbow 25"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 sm:py-2 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <p className="text-xs text-gray-500">
+                    Also searched here and in POS, and used to match handwritten stock-count sheets.
+                  </p>
                 </div>
 
                 <div className="order-2 sm:order-1">
@@ -1262,7 +1281,14 @@ function ProductsPageContent() {
                         </div>
                       )}
                     </td>
-                    <td className="px-3 py-2.5 font-medium truncate" title={p.name}>{p.name}</td>
+                    <td className="px-3 py-2.5 truncate" title={p.name}>
+                      <span className="font-medium">{p.name}</span>
+                      {p.alias && (
+                        <span className="block text-xs text-blue-600 truncate" title={p.alias}>
+                          {p.alias}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-3 py-2.5 text-xs text-gray-500 truncate">
                       {p.specification && <span className="font-medium text-gray-700">{p.specification}</span>}
                       {p.specification && (p.unitId || p.stockUnit) && <span className="text-gray-400"> · </span>}
