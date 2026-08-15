@@ -7,6 +7,8 @@ export type NewProductInput = {
   name: string
   /** Shop-floor name. Usually the raw text off the count sheet. */
   alias?: string
+  /** Uploaded photo URL. Stock takers identify items by sight, not by name. */
+  imageUrl?: string
   sellingPrice: number
   /** Omit entirely when the user lacks cost-price permission — the server then
    *  skips its cost permission check and defaults the stored cost to 0. */
@@ -45,6 +47,7 @@ export async function createStockCountProduct(
     costPrice: input.costPrice ?? 0,
     categoryId: input.categoryId ?? '',
     brand,
+    imageUrl: input.imageUrl?.trim() || undefined,
     createdAt: new Date().toISOString(),
   }
 
@@ -64,6 +67,7 @@ export async function createStockCountProduct(
       ...(input.costPrice != null ? { costPrice: input.costPrice } : {}),
       category: input.categoryName ?? null,
       brand: product.brand,
+      imageUrl: product.imageUrl ?? null,
     }),
   })
 
